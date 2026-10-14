@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+/* Class-based dark mode so the header toggle can override the OS preference. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+  --color-accent-50: oklch(0.97 0.014 275);
+  --color-accent-100: oklch(0.93 0.034 275);
+  --color-accent-200: oklch(0.87 0.065 275);
+  --color-accent-400: oklch(0.7 0.15 275);
+  --color-accent-500: oklch(0.6 0.2 275);
+  --color-accent-600: oklch(0.53 0.22 275);
+  --color-accent-700: oklch(0.46 0.21 275);
+}
+
+@layer base {
+  html { color-scheme: light; }
+  html.dark { color-scheme: dark; }
+  body { @apply bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100; }
+  button:not(:disabled), [role="button"], summary { cursor: pointer; }
+}
+
+/* Checkerboard behind sprites so transparent pixels are visible. */
+.checker {
+  background-color: #fff;
+  background-image:
+    linear-gradient(45deg, #e4e4e7 25%, transparent 25%, transparent 75%, #e4e4e7 75%),
+    linear-gradient(45deg, #e4e4e7 25%, transparent 25%, transparent 75%, #e4e4e7 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 10px 10px;
+}
+.dark .checker {
+  background-color: #27272a;
+  background-image:
+    linear-gradient(45deg, #3f3f46 25%, transparent 25%, transparent 75%, #3f3f46 75%),
+    linear-gradient(45deg, #3f3f46 25%, transparent 25%, transparent 75%, #3f3f46 75%);
+}
+
+/* Dotted workspace background; position is driven by the pan offset inline. */
+.canvas-dots {
+  background-color: #f4f4f5;
+  background-image: radial-gradient(circle, rgb(161 161 170 / 0.55) 1.2px, transparent 1.2px);
+  background-size: 28px 28px;
+}
+.dark .canvas-dots {
+  background-color: #09090b;
+  background-image: radial-gradient(circle, rgb(82 82 91 / 0.6) 1.2px, transparent 1.2px);
+}
+
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+.skeleton { position: relative; overflow: hidden; }
+.skeleton::after {
+  content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.45), transparent);
+  animation: shimmer 1.4s infinite;
+}
+.dark .skeleton::after { background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.06), transparent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after { animation: none; }
+}
