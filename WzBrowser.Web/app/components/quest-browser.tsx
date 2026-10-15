@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardE
 import type { QuestSummary } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { useActions } from "../lib/workspace";
-import { Search } from "./icons";
+import { Search, XMark } from "./icons";
 import { QuestDetailView } from "./quest-detail";
 import { inputClass } from "./ui";
 
@@ -90,6 +90,16 @@ export const QuestBrowser = memo(function QuestBrowser({ fileId, revision, onOpe
   };
   const previousQuest = history.length ? quests?.find((q) => q.id === history[history.length - 1]) : undefined;
 
+  // Clearing the search brings back every quest; keep the selected one centred so the user can look around it.
+  const clearFilter = () => {
+    setFilter("");
+    const index = selected == null || !quests ? -1 : quests.findIndex((q) => q.id === selected);
+    requestAnimationFrame(() => {
+      const el = listRef.current;
+      if (el) el.scrollTop = index < 0 ? 0 : Math.max(0, index * ROW_H - el.clientHeight / 2 + ROW_H / 2);
+    });
+  };
+
   const scrollToIndex = (i: number) => {
     const el = listRef.current;
     if (!el) return;
@@ -133,13 +143,24 @@ export const QuestBrowser = memo(function QuestBrowser({ fileId, revision, onOpe
                 value={filter}
                 onChange={(e) => { setFilter(e.target.value); if (listRef.current) listRef.current.scrollTop = 0; }}
                 onKeyDown={(e) => {
-                  if (e.key === "Escape") setFilter("");
+                  if (e.key === "Escape") clearFilter();
                   if (e.key === "ArrowDown" || e.key === "Enter") { e.preventDefault(); move(selectedIndex < 0 ? 0 : selectedIndex + 1); }
                 }}
                 placeholder="Search by id or name…"
                 aria-label="Search quests"
-                className={`${inputClass} !rounded-lg !py-2 pl-10`}
+                className={`${inputClass} !rounded-lg !py-2 pl-10 ${filter ? "pr-10" : ""}`}
               />
+              {filter && (
+                <button
+                  type="button"
+                  onClick={(e) => { clearFilter(); (e.currentTarget.previousElementSibling as HTMLElement | null)?.focus(); }}
+                  aria-label="Clear search"
+                  title="Clear search (Esc)"
+                  className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+                >
+                  <XMark className="size-4" />
+                </button>
+              )}
             </label>
             <p className="mt-2 px-1 text-xs text-zinc-500">
               {quests ? (needle ? `${visible.length.toLocaleString()} of ${quests.length.toLocaleString()} quests` : `${quests.length.toLocaleString()} quests`) : error ? "" : "Loading…"}

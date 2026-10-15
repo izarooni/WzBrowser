@@ -3,7 +3,7 @@ import type { WzNode } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { baseName, canPaste, joinPath, parentPath } from "../lib/paths";
 import { dnd, useActions, useWorkspaceData, type ClipItem, type TreeEvent } from "../lib/workspace";
-import { ChevronRight, Copy, Document, Folder, Music, Photo, Search } from "./icons";
+import { ChevronRight, Copy, Document, Folder, Music, Photo, Search, XMark } from "./icons";
 import { inputClass } from "./ui";
 
 type Level =
@@ -56,6 +56,12 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
   const hoverTimer = useRef<{ path: string; id: ReturnType<typeof setTimeout> } | null>(null);
   const levelsRef = useRef(levels);
   levelsRef.current = levels;
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  // Folders the filter opened on its own (not by the user), closed again when the filter is cleared.
+  const filterOpened = useRef(new Set<string>());
+  // A node to scroll to the middle of the tree once the rows have re-rendered.
+  const centerRef = useRef<string | null>(null);
 
   // ------------------------------------------------------------ loading
 
@@ -76,6 +82,7 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
     if (status !== "online") return;
     setLevels({});
     setExpanded(new Set());
+    filterOpened.current = new Set();
     setSelected(null);
     loadLevel("");
   }, [status, fileId, loadLevel]);
@@ -91,6 +98,7 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
     if (e.reset) {
       setLevels({});
       setExpanded(new Set());
+      filterOpened.current = new Set();
       setSelected(null);
       loadLevel("");
       return;
@@ -103,7 +111,7 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
       setRevealTick((n) => n + 1);
       setExpanded((cur) => {
         const next = new Set(cur);
-        for (let p = parentPath(target); p; p = parentPath(p)) { next.add(p); loadLevel(p); }
+        for (let p = parentPath(target); p; p = parentPath(p)) { next.add(p); filterOpened.current.delete(p); loadLevel(p); }
         return next;
       });
     }
@@ -149,7 +157,10 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
         setHits({ needle, paths, ancestors });
         // Open the way to every hit, and the hits themselves so their sub-properties show.
         const open = [...ancestors, ...found];
-        setExpanded((cur) => new Set([...cur, ...open]));
+        setExpanded((cur) => {
+          for (const p of open) if (!cur.has(p)) filterOpened.current.add(p);
+          return new Set([...cur, ...open]);
+        });
         loadLevel("");
         open.forEach((p) => loadLevel(p));
       }, () => { if (live) setHits(null); });
@@ -193,11 +204,39 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
 
   const nodeRows = useMemo(() => rows.filter((r): r is Extract<Row, { kind: "node" }> => r.kind === "node"), [rows]);
 
+  // Opening or closing a folder by hand makes it the user's, so clearing the filter leaves it as they set it.
   const expand = (path: string) => {
+    filterOpened.current.delete(path);
     setExpanded((cur) => (cur.has(path) ? cur : new Set(cur).add(path)));
     loadLevel(path);
   };
-  const collapse = (path: string) => setExpanded((cur) => { const n = new Set(cur); n.delete(path); return n; });
+  const collapse = (path: string) => {
+    filterOpened.current.delete(path);
+    setExpanded((cur) => { const n = new Set(cur); n.delete(path); return n; });
+  };
+
+  // Close the folders the filter opened, except the way to the selected node, and keep that node centred.
+  const restoreFolders = useCallback(() => {
+    const opened = filterOpened.current;
+    if (!opened.size) return;
+    const sel = selectedRef.current;
+    centerRef.current = sel;
+    filterOpened.current = new Set();
+    const keep = new Set<string>();
+    if (sel != null) for (let a = parentPath(sel); a; a = parentPath(a)) keep.add(a);
+    setExpanded((cur) => new Set([...cur].filter((p) => !opened.has(p) || keep.has(p))));
+  }, []);
+
+  // Runs before the restore effect below, so it scrolls once the restored rows are on screen rather than before.
+  useEffect(() => {
+    const target = centerRef.current;
+    if (target == null) return;
+    centerRef.current = null;
+    rowRefs.current.get(target)?.scrollIntoView({ block: "center" });
+  }, [rows]);
+
+  // Also restore when the filter is emptied by typing rather than with the clear button or Esc.
+  useEffect(() => { if (!needle) restoreFolders(); }, [needle, restoreFolders]);
 
   const select = (path: string, focus = false) => {
     setSelected(path);
@@ -206,6 +245,13 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
       el?.scrollIntoView({ block: "nearest" });
       el?.focus({ preventScroll: true });
     });
+  };
+
+  const clearFilter = () => {
+    if (!filter) return;
+    setFilter("");
+    restoreFolders();
+    centerRef.current = selected;
   };
 
   const onRowClick = (path: string, node: WzNode) => {
@@ -330,11 +376,22 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
             <input
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Escape") setFilter(""); }}
+              onKeyDown={(e) => { if (e.key === "Escape") clearFilter(); }}
               placeholder="Filter entries (searches inside .img files)…"
               aria-label="Filter entries"
-              className={`${inputClass} !rounded-lg !py-2 pl-10`}
+              className={`${inputClass} !rounded-lg !py-2 pl-10 ${filter ? "pr-10" : ""}`}
             />
+            {filter && (
+              <button
+                type="button"
+                onClick={(e) => { clearFilter(); (e.currentTarget.previousElementSibling as HTMLElement | null)?.focus(); }}
+                aria-label="Clear filter"
+                title="Clear filter (Esc)"
+                className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+              >
+                <XMark className="size-4" />
+              </button>
+            )}
           </label>
         </div>
 
