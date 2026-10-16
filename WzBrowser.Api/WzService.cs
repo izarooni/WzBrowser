@@ -20,6 +20,9 @@ public record OpenedFileDto(string Id, string Name, string Path, string Encrypti
 
 public record SoundData(byte[] Bytes, string ContentType);
 
+/// <param name="Link">Set when the sprite is a link (UOL, _inlink, _outlink): its value, shown instead of the image.</param>
+public record ObjRefResult(string Path, NodeDto Node, string? Link);
+
 public record PasteRequest(string SourceId, string SourcePath, string? TargetPath, bool Move);
 public record PasteResult(string Path, NodeDto Node, OpenedFileDto File, OpenedFileDto? SourceFile);
 public record SaveResult(string Path, long Size, OpenedFileDto File);
@@ -256,6 +259,41 @@ public sealed partial class WzService
         using var ms = new MemoryStream();
         bitmap.Save(ms, ImageFormat.Png);
         return ms.ToArray();
+    }
+
+    /// <summary>
+    /// For a placed map object (".../obj/8" or one of its children such as "l0"), the sprite it refers to at
+    /// "Obj/{oS}.img/{l0}/{l1}/{l2}" in the same file. Null when the node isn't an object or the sprite is missing.
+    /// </summary>
+    public ObjRefResult? ObjRef(string id, string path)
+    {
+        var entry = Get(id);
+        lock (entry.Lock)
+        {
+            var node = Resolve(entry.File, path) as WzImageProperty;
+            var obj = node?["oS"] != null ? node : node?.Parent is WzImageProperty p && p["oS"] != null ? p : null;
+            if (obj == null) return null;
+
+            var parts = new[] { "oS", "l0", "l1", "l2" }.Select(n => obj[n]?.GetString()).ToArray();
+            if (parts.Any(string.IsNullOrEmpty))
+                throw new KeyNotFoundException("This object is missing one of oS, l0, l1, l2.");
+
+            var targetPath = $"Obj/{parts[0]}.img/{parts[1]}/{parts[2]}/{parts[3]}";
+            var target = Resolve(entry.File, targetPath);
+            return new ObjRefResult(targetPath, Describe(target), LinkOf(target));
+        }
+    }
+
+    /// <summary>The link a node stands for (a UOL's value, or a canvas' _inlink/_outlink), checking frame 0 of a sub.</summary>
+    private static string? LinkOf(object node)
+    {
+        static string? Own(WzImageProperty? p) => p switch
+        {
+            WzUOLProperty u => u.Value,
+            WzCanvasProperty c => (c["_inlink"] ?? c["_outlink"])?.GetString(),
+            _ => null,
+        };
+        return node is WzImageProperty prop ? Own(prop) ?? (prop is WzSubProperty ? Own(prop["0"]) : null) : null;
     }
 
     public SoundData Sound(string id, string path)

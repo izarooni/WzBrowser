@@ -1,9 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
-import type { WzNode } from "../lib/api";
+import type { ObjRef, WzNode } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { baseName, canPaste, joinPath, parentPath } from "../lib/paths";
 import { dnd, useActions, useWorkspaceData, type ClipItem, type TreeEvent } from "../lib/workspace";
-import { ChevronRight, Copy, Document, Folder, Music, Photo, Search, XMark } from "./icons";
+import { ChevronRight, Copy, Document, ExclamationTriangle, Folder, Music, Photo, Search, XMark } from "./icons";
 import { inputClass } from "./ui";
 
 type Level =
@@ -572,6 +572,8 @@ function Detail({ fileId, path, node, fileName, childCount, canPasteHere, onCopy
         </div>
       )}
 
+      {OBJ_PATH.test(path) && <ObjPreview key={`obj:${fileId}/${path}`} fileId={fileId} path={path} />}
+
       {node.type !== "canvas" && node.hasChildren && <FrameAnimation key={`${fileId}/${path}`} fileId={fileId} path={path} />}
 
       {node.type === "sound" && (
@@ -601,10 +603,76 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 const MAX_FRAMES = 128;
 const DEFAULT_DELAY = 100;
 
+/** Placed map objects (`Map/Map1/140010000.img/3/obj/8` and its `oS`/`l0`/... children). */
+const OBJ_PATH = /\/obj\/\d+(\/[^/]+)?$/;
+
+/** Shows the sprite a map object refers to (`Obj/{oS}.img/{l0}/{l1}/{l2}`), or the link it is when it's a link. */
+function ObjPreview({ fileId, path }: { fileId: string; path: string }) {
+  const { api } = useConnection();
+  const [state, setState] = useState<
+    { status: "loading" } | { status: "none" } | { status: "error"; message: string } | { status: "ready"; ref: ObjRef }
+  >({ status: "loading" });
+  const [imgFailed, setImgFailed] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    api.objRef(fileId, path).then(
+      (ref) => { if (live) setState(ref ? { status: "ready", ref } : { status: "none" }); },
+      (e) => { if (live) setState({ status: "error", message: e instanceof Error ? e.message : String(e) }); },
+    );
+    return () => { live = false; };
+  }, [api, fileId, path]);
+
+  if (state.status === "none" || state.status === "loading") return null;
+
+  const box = "checker grid max-h-64 min-h-24 place-items-center overflow-auto rounded-xl border border-zinc-200 p-4 dark:border-zinc-700";
+  const failure = (message: string) => (
+    <div className={`${box} gap-2 text-center`}>
+      <ExclamationTriangle className="size-7 text-rose-500" />
+      <p className="text-xs text-zinc-500">{message}</p>
+    </div>
+  );
+
+  let body: ReactNode;
+  if (state.status === "error") body = failure(state.message);
+  else {
+    const { ref } = state;
+    if (ref.link != null) body = (
+      <div className="rounded-xl bg-zinc-50 p-3 text-[13px] dark:bg-zinc-950">
+        <span className="text-zinc-500">Link → </span><span className="break-all font-mono">{ref.link}</span>
+      </div>
+    );
+    else if (ref.node.type === "canvas") body = imgFailed ? failure("Couldn't render this image.") : (
+      <div className={box}>
+        <img src={api.pngUrl(fileId, ref.path)} alt={ref.node.name} draggable={false} onError={() => setImgFailed(true)}
+          style={{ imageRendering: "pixelated", maxWidth: "none" }} />
+      </div>
+    );
+    else body = <FrameAnimation fileId={fileId} path={ref.path} minFrames={1} fallback={failure("No frames found for this object.")} />;
+  }
+
+  return (
+    <div className="space-y-2.5">
+      <div className="space-y-0.5">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Object sprite</h4>
+        {state.status === "ready" && <p className="break-all font-mono text-[11px] text-zinc-500">{state.ref.path}</p>}
+      </div>
+      {body}
+    </div>
+  );
+}
+
 /** Plays the numbered canvas children of a property (e.g. `smile0`, `effect/skill/overSwingDouble/0`) as an animation. */
-function FrameAnimation({ fileId, path }: { fileId: string; path: string }) {
+function FrameAnimation({ fileId, path, minFrames = 2, fallback = null }: {
+  fileId: string;
+  path: string;
+  /** Fewer numbered canvases than this and nothing (or `fallback`) is shown. */
+  minFrames?: number;
+  fallback?: ReactNode;
+}) {
   const { api } = useConnection();
   const [frames, setFrames] = useState<{ name: string; width: number; delay: number }[] | null>(null);
+  const [empty, setEmpty] = useState(false);
   const [index, setIndex] = useState(0);
   const [playing, setPlaying] = useState(true);
   const [zoom, setZoom] = useState(1);
@@ -618,7 +686,7 @@ function FrameAnimation({ fileId, path }: { fileId: string; path: string }) {
           .filter((k) => k.type === "canvas" && /^\d+$/.test(k.name))
           .sort((a, b) => Number(a.name) - Number(b.name))
           .slice(0, MAX_FRAMES);
-        if (canvases.length < 2) return;
+        if (canvases.length < minFrames) { if (!cancelled) setEmpty(true); return; }
         // A frame's own "delay" child (ms) sets how long it shows; missing or unreadable falls back to the default.
         const delays = await Promise.all(canvases.map(async (c) => {
           try {
@@ -628,10 +696,10 @@ function FrameAnimation({ fileId, path }: { fileId: string; path: string }) {
           } catch { return DEFAULT_DELAY; }
         }));
         if (!cancelled) setFrames(canvases.map((c, i) => ({ name: c.name, width: c.width ?? 0, delay: delays[i] })));
-      } catch { /* not an animation */ }
+      } catch { if (!cancelled) setEmpty(true); /* not an animation */ }
     })();
     return () => { cancelled = true; };
-  }, [api, fileId, path]);
+  }, [api, fileId, path, minFrames]);
 
   const count = frames?.length ?? 0;
   useEffect(() => {
@@ -640,7 +708,7 @@ function FrameAnimation({ fileId, path }: { fileId: string; path: string }) {
     return () => clearTimeout(t);
   }, [playing, count, index, frames]);
 
-  if (!frames) return null;
+  if (!frames) return empty ? <>{fallback}</> : null;
   const cur = frames[index % count];
   const btn = "rounded-md px-2.5 py-1 text-xs font-semibold transition";
 
@@ -655,7 +723,7 @@ function FrameAnimation({ fileId, path }: { fileId: string; path: string }) {
         />
       </div>
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+        <div className={`flex items-center gap-2 ${count < 2 ? "invisible" : ""}`}>
           <button type="button" onClick={() => setPlaying((p) => !p)}
             className={`${btn} bg-zinc-100 text-zinc-700 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700`}>
             {playing ? "Pause" : "Play"}
@@ -671,8 +739,8 @@ function FrameAnimation({ fileId, path }: { fileId: string; path: string }) {
           ))}
         </div>
       </div>
-      <input type="range" min={0} max={count - 1} value={index % count} aria-label="Frame"
-        onChange={(e) => { setPlaying(false); setIndex(Number(e.target.value)); }} className="w-full" />
+      {count > 1 && <input type="range" min={0} max={count - 1} value={index % count} aria-label="Frame"
+        onChange={(e) => { setPlaying(false); setIndex(Number(e.target.value)); }} className="w-full" />}
     </div>
   );
 }

@@ -122,6 +122,10 @@ api.MapGet("/files/{id}/preview", (string id, string kind, int refId, HttpContex
 });
 api.MapGet("/files/{id}/png", (string id, string path, WzService wz) =>
     Results.File(wz.Png(id, path), "image/png"));
+// A placed map object (Map/.../obj/N) -> the sprite it shows, at Obj/{oS}.img/{l0}/{l1}/{l2}.
+// 204 when the node isn't a map object; 404 when it is but the sprite can't be found.
+api.MapGet("/files/{id}/objref", (string id, string path, WzService wz) =>
+    wz.ObjRef(id, path) is { } r ? Results.Ok(r) : Results.NoContent());
 api.MapGet("/files/{id}/sound", (string id, string path, WzService wz) =>
 {
     var s = wz.Sound(id, path);

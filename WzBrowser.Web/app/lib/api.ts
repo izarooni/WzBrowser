@@ -61,6 +61,9 @@ export interface PasteResult {
   sourceFile: OpenedFile | null;
 }
 
+/** The sprite a map object points at. `link` is set when that sprite is a link (UOL, _inlink, _outlink). */
+export interface ObjRef { path: string; node: WzNode; link: string | null }
+
 export interface SaveResult { path: string; size: number; file: OpenedFile }
 
 export interface FsEntry { name: string; path: string; isDirectory: boolean; size: number | null }
@@ -159,6 +162,9 @@ export function createApi(base: string) {
       request<SaveResult>(`/api/files/${id}/save`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }),
     revert: (id: string) => request<OpenedFile>(`/api/files/${id}/revert`, { method: "POST" }),
     pngUrl: (id: string, path: string) => `${base}/api/files/${id}/png?path=${q(path)}`,
+    /** For a placed map object (`.../obj/N` or one of its children), the sprite it refers to in `Obj/`. */
+    /** Undefined when the node isn't a map object; throws when it is but the sprite can't be found. */
+    objRef: (id: string, path: string) => request<ObjRef | undefined>(`/api/files/${id}/objref?path=${q(path)}`),
     soundUrl: (id: string, path: string) => `${base}/api/files/${id}/sound?path=${q(path)}`,
   };
 }
