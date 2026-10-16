@@ -87,6 +87,23 @@ public sealed partial class WzService
         }
     }
 
+    /// <summary>Removes entries by name. All must exist, or nothing is removed.</summary>
+    public OpenedFileDto DeleteCommodity(string id, List<string> entries)
+    {
+        if (entries.Count == 0) throw new ArgumentException("Nothing to delete.");
+        var entry = GetEtcArchive(id);
+        lock (entry.Lock)
+        {
+            var img = CommodityImage(entry);
+            var props = entries.Distinct().Select(name =>
+                img[name] ?? throw new KeyNotFoundException($"Entry '{name}' not found in {CommodityImg}.")).ToList();
+            foreach (var p in props) p.Remove();
+            MarkChanged(img);
+            Touch(entry);
+            return Describe(id, entry);
+        }
+    }
+
     /// <summary>
     /// Adds an entry named one past the highest numbered entry, filled with CashCommodities' defaults and a fresh SN.
     /// Property names follow the spelling the file already uses (e.g. "gender" vs "Gender").

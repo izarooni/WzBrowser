@@ -11,6 +11,9 @@ const ROW_H = 40;
 const OVERSCAN = 8;
 const IMG = "Commodity.img";
 
+/** Stands for the row-selection checkbox column wherever a column index is expected. */
+const SELECT = -1;
+
 const INTEGER = new Set(["int", "short", "long"]);
 const RANGE: Record<string, [bigint, bigint]> = {
   short: [-32768n, 32767n],
@@ -221,22 +224,73 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
     return () => { window.removeEventListener("keyup", onKeyUp); window.removeEventListener("blur", drop); };
   }, []);
 
+  /** Flips a checkbox (an OnSale cell, or the row's selection when `col` is SELECT), extending a range on Shift. */
   const toggle = (row: CommodityRow, col: number, shift: boolean) => {
-    const value = row.cells[col]?.value === "1" ? "0" : "1";
+    const current = col === SELECT ? (selected.has(row.name) ? "1" : "0") : row.cells[col]?.value;
+    const value = current === "1" ? "0" : "1";
     const a = anchor.current;
     const from = shift && a && a.col === col ? visible.findIndex((r) => r.name === a.row) : -1;
+    let rows = [row];
     if (!shift || from < 0) {
       anchor.current = shift ? { row: row.name, col, value } : null;
       setAnchorRow(shift ? row.name : null);
-      void commitMany([row], col, value);
-      return;
+    } else {
+      const to = visible.findIndex((r) => r.name === row.name);
+      rows = visible.slice(Math.min(from, to), Math.max(from, to) + 1);
+      // Keep chaining from the row just clicked.
+      anchor.current = { row: row.name, col, value: a!.value };
+      setAnchorRow(row.name);
     }
-    const to = visible.findIndex((r) => r.name === row.name);
-    const range = visible.slice(Math.min(from, to), Math.max(from, to) + 1).filter((r) => r.cells[col]?.value !== a!.value);
-    // Keep chaining from the row just clicked.
-    anchor.current = { row: row.name, col, value: a!.value };
-    setAnchorRow(row.name);
-    void commitMany(range, col, a!.value);
+    const target = anchor.current?.value ?? value;
+    if (col === SELECT) select(rows, target === "1");
+    else void commitMany(rows.filter((r) => r.cells[col]?.value !== target), col, target);
+  };
+
+  // ------------------------------------------------------------ selecting and deleting
+
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const select = (rows: CommodityRow[], on: boolean) => setSelected((s) => {
+    const next = new Set(s);
+    for (const r of rows) if (on) next.add(r.name); else next.delete(r.name);
+    return next;
+  });
+
+  // Entries that disappear (deleted, or gone after a revert) leave the selection.
+  useEffect(() => {
+    if (!table) return;
+    setSelected((s) => {
+      if (s.size === 0) return s;
+      const present = new Set(table.rows.map((r) => r.name));
+      const next = new Set([...s].filter((n) => present.has(n)));
+      return next.size === s.size ? s : next;
+    });
+  }, [table]);
+
+  const visibleSelected = visible.reduce((n, r) => n + (selected.has(r.name) ? 1 : 0), 0);
+
+  const deleteSelected = async () => {
+    const names = [...selected];
+    if (names.length === 0) return;
+    const hidden = names.length - visibleSelected;
+    const ok = await actions.confirm({
+      title: `Delete ${names.length.toLocaleString()} ${names.length === 1 ? "entry" : "entries"}?`,
+      body: `${hidden > 0 ? `${hidden.toLocaleString()} of them ${hidden === 1 ? "is" : "are"} hidden by the search. ` : ""}They are removed from the open file in memory only. Nothing on disk changes until you save, and you can discard all edits with Revert.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const file = await api.deleteCommodity(fileId, names);
+      ownRevisions.current.add(file.revision);
+      const gone = new Set(names);
+      setTable((t) => (t ? { ...t, rows: t.rows.filter((r) => !gone.has(r.name)) } : t));
+      setSelected(new Set());
+      actions.edited(file, [IMG]);
+      actions.toast("success", `Deleted ${names.length.toLocaleString()} ${names.length === 1 ? "entry" : "entries"}.`);
+    } catch (e) {
+      actions.toast("error", e instanceof Error ? e.message : String(e));
+    }
   };
 
   /** The next editable column after `col` in the same row (Tab), or before it (Shift+Tab). */
@@ -281,7 +335,7 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
   // ------------------------------------------------------------ layout
 
   const ref = useMemo<RefContext>(() => ({ fileId, openQuest: () => {} }), [fileId]);
-  const template = ["88px", ...(itemCol >= 0 ? ["240px"] : []), ...columns.map((c) => `${colWidth(c)}px`), "84px"].join(" ");
+  const template = ["40px", "88px", ...(itemCol >= 0 ? ["240px"] : []), ...columns.map((c) => `${colWidth(c)}px`), "84px"].join(" ");
   const headCell = "flex items-center gap-1.5 px-3 text-left text-xs font-semibold text-zinc-600 dark:text-zinc-300";
   const sortMark = (col: number) => (sort?.col === col ? (sort.desc ? " ↓" : " ↑") : "");
 
@@ -314,6 +368,11 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
           <p className="shrink-0 text-xs text-zinc-500">
             {table ? (needle ? `${visible.length.toLocaleString()} of ${table.rows.length.toLocaleString()} entries` : `${table.rows.length.toLocaleString()} entries`) : error ? "" : "Loading…"}
           </p>
+          <button type="button" onClick={() => void deleteSelected()} disabled={selected.size === 0}
+            title={selected.size ? "Delete the selected entries" : "Tick rows in the first column to select them"}
+            className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-white px-3.5 py-2 text-[13px] font-semibold text-rose-700 shadow-sm transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:text-zinc-400 disabled:hover:bg-white dark:border-rose-900 dark:bg-zinc-900 dark:text-rose-300 dark:hover:bg-rose-950/40 dark:disabled:border-zinc-800 dark:disabled:text-zinc-600 dark:disabled:hover:bg-zinc-900">
+            <XMark className="size-4" />Delete{selected.size > 0 && ` ${selected.size.toLocaleString()}`}
+          </button>
           <button type="button" onClick={() => setAdding((a) => !a)} aria-expanded={adding} className={`${buttonPrimary} !rounded-lg !px-3.5 !py-2 !text-[13px]`}>
             <Plus className="size-4" />Add entry
           </button>
@@ -360,6 +419,14 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
             <div role="table" aria-label={IMG} aria-rowcount={visible.length + 1} className="w-max min-w-full text-[13px]">
               <div role="row" style={{ gridTemplateColumns: template, height: ROW_H }}
                 className="sticky top-0 z-10 grid border-b border-zinc-200 bg-zinc-50/95 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95">
+                <div role="columnheader" className="grid place-items-center">
+                  {/* Selects (or clears) the rows the search shows. */}
+                  <input type="checkbox" aria-label="Select all shown entries" title="Select all shown entries"
+                    checked={visible.length > 0 && visibleSelected === visible.length}
+                    ref={(el) => { if (el) el.indeterminate = visibleSelected > 0 && visibleSelected < visible.length; }}
+                    onChange={() => select(visible, visibleSelected < visible.length)}
+                    className="size-4 cursor-pointer accent-accent-600" />
+                </div>
                 <button type="button" role="columnheader" onClick={() => toggleSort(-1)} className={headCell}>Entry{sortMark(-1)}</button>
                 {itemCol >= 0 && <div role="columnheader" className={headCell}>Item</div>}
                 {columns.map((c, i) => (
@@ -378,15 +445,25 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
                 {shown.map((row, i) => {
                   const itemId = itemIdOf(row);
                   const itemName = itemId == null ? undefined : names("item", itemId);
+                  const isSelected = selected.has(row.name);
                   return (
                     <div
                       key={row.name}
                       role="row"
                       style={{ position: "absolute", top: (start + i) * ROW_H, height: ROW_H, left: 0, right: 0, gridTemplateColumns: template }}
                       className={`group grid items-stretch border-b border-zinc-100 transition-colors dark:border-zinc-800/70 ${
-                        flash === row.name ? "bg-emerald-50 dark:bg-emerald-500/10" : "hover:bg-zinc-50/80 dark:hover:bg-zinc-800/40"
+                        flash === row.name ? "bg-emerald-50 dark:bg-emerald-500/10"
+                          : isSelected ? "bg-accent-50/70 dark:bg-accent-600/10"
+                          : "hover:bg-zinc-50/80 dark:hover:bg-zinc-800/40"
                       }`}
                     >
+                      {/* Shift+mousedown would otherwise extend a text selection from the last click to here. */}
+                      <div role="cell" onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }} className="grid select-none place-items-center">
+                        <input type="checkbox" checked={isSelected} aria-label={`Select entry ${row.name}`}
+                          title="Select for deletion. Shift-click two boxes to select every row between."
+                          onChange={(e) => toggle(row, SELECT, (e.nativeEvent as MouseEvent).shiftKey === true)}
+                          className={`size-4 cursor-pointer accent-accent-600 ${anchorRow === row.name && anchor.current?.col === SELECT ? "rounded-sm outline-2 outline-offset-2 outline-accent-500" : ""}`} />
+                      </div>
                       <div role="cell" className="flex items-center px-3 font-mono text-xs tabular-nums text-zinc-500">{row.name}</div>
                       {itemCol >= 0 && (
                         <div role="cell" className="flex min-w-0 items-center gap-1.5 px-2">

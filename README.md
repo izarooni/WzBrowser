@@ -90,6 +90,7 @@ Opening a file with `Commodity.img` at its root (normally `Etc.wz`) gives a **Co
 - The **Item** column shows the item's icon and name (from `String.wz`, `Character.wz` and `Item.wz` in the same folder) and links to it like the quest view does.
 - **Add entry** asks for an item id and whether it is a donor item. The entry is named one past the highest entry number and gets the defaults [CashCommodities](https://github.com/izarooni/CashCommodities) uses: Count 1, Gender 2, OnSale 1, Period 90, Price 4000, Priority 99, Class 4. Property names follow the spelling the file already uses.
 - The SN is generated the way CashCommodities does it: `10000000` for donor items or `20000000` for regular ones, plus the item's Cash Shop category × `100000`, plus the lowest free number from 1. For example, a regular hat gets the first free `200000xx`.
+- The first column selects rows for deletion. Shift-click works there the same way as on `OnSale`, and the header box selects or clears every row the search shows. **Delete** next to the search box removes all selected rows in one edit, after asking; the dialog says if some of them are hidden by the search.
 - Each row has **Raw** (show it in the raw tree) and delete buttons. Edits work like any other edit: in memory until you save a new file.
 
 ## Web

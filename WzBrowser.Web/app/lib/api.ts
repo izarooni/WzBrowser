@@ -162,6 +162,13 @@ export function createApi(base: string) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       }),
+    /** Removes these Commodity.img entries; all must exist, or nothing is removed. */
+    deleteCommodity: (id: string, entries: string[]) =>
+      request<OpenedFile>(`/api/files/${id}/commodity/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(entries),
+      }),
     lookup: (id: string, ids: LookupRequest) =>
       request<LookupResult>(`/api/files/${id}/lookup`, {
         method: "POST",

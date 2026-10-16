@@ -112,6 +112,8 @@ interface Actions {
   /** Follows a link from a quest archive: opens the file holding the item/NPC/mob/map/skill and reveals it there. */
   followRef: (questFileId: string, kind: LookupKind, id: number) => Promise<void>;
   toast: (kind: Toast["kind"], text: string) => void;
+  /** Asks in the shared dialog; resolves true when confirmed. */
+  confirm: (opts: ConfirmOptions) => Promise<boolean>;
 }
 
 const LayoutCtx = createContext<LayoutState | null>(null);
@@ -348,8 +350,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     tidy: () => dispatch({ type: "tidy" }),
     openPicker: () => setPickerOpen(true),
     paste, deleteNode, save, revert, subscribe, toast,
-    reveal, takePendingReveal, showWindow, followRef, edited,
-  }), [openFile, closeWindow, paste, deleteNode, save, revert, subscribe, toast, reveal, takePendingReveal, showWindow, followRef, edited]);
+    reveal, takePendingReveal, showWindow, followRef, edited, confirm,
+  }), [openFile, closeWindow, paste, deleteNode, save, revert, subscribe, toast, reveal, takePendingReveal, showWindow, followRef, edited, confirm]);
 
   return (
     <ActionsCtx.Provider value={actions}>
