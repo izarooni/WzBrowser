@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import type { CommodityCell, CommodityColumn, CommodityRow, CommodityRowResult, CommodityTable } from "../lib/api";
+import type { CommodityCell, CommodityColumn, CommodityRow, CommodityRowsResult, CommodityTable } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { useNames } from "../lib/use-names";
 import { useActions } from "../lib/workspace";
@@ -168,38 +168,75 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
 
   // ------------------------------------------------------------ editing
 
-  /** Merges an edit's result into the table, in the column order already on screen. */
-  const apply = (r: CommodityRowResult, reload: string[]) => {
+  /** Merges an edit's result into the table, in the column order already on screen. New entries are appended. */
+  const apply = (r: CommodityRowsResult, reload: string[]) => {
     ownRevisions.current.add(r.file.revision);
     setTable((t) => {
       if (!t) return t;
       const columns = keepOrder(t.columns, r.columns);
-      const row = remap(r.row, r.columns, columns);
-      let rows = t.rows.map((x) => remap(x, t.columns, columns));
-      const at = rows.findIndex((x) => x.name === row.name);
-      rows = at < 0 ? [...rows, row] : rows.map((x, i) => (i === at ? row : x));
-      return { columns, rows };
+      const changed = new Map(r.rows.map((x) => [x.name, remap(x, r.columns, columns)]));
+      const rows = t.rows.map((x) => changed.get(x.name) ?? remap(x, t.columns, columns));
+      const known = new Set(t.rows.map((x) => x.name));
+      return { columns, rows: [...rows, ...[...changed.values()].filter((x) => !known.has(x.name))] };
     });
     actions.edited(r.file, reload);
   };
 
-  const commit = async (row: CommodityRow, col: number, value: string) => {
+  /** Stores `value` in column `col` of each row, as one edit. */
+  const commitMany = async (rows: CommodityRow[], col: number, value: string) => {
+    if (rows.length === 0) return;
     const column = columns[col];
-    const cell = row.cells[col];
-    const type = cell?.type ?? column.type;
-    if (cell && cell.value === value) return;
-    const problem = invalid(type, value);
+    const sets = rows.map((row) => ({ entry: row.name, property: column.name, type: row.cells[col]?.type ?? column.type, value }));
+    const problem = invalid(sets[0].type, value);
     if (problem) { actions.toast("error", `${column.name}: ${problem}`); return; }
 
-    const tag = `${row.name}/${col}`;
-    setPending((p) => new Set(p).add(tag));
+    const tags = rows.map((row) => `${row.name}/${col}`);
+    setPending((p) => new Set([...p, ...tags]));
     try {
-      apply(await api.setCommodity(fileId, { entry: row.name, property: column.name, type, value }), [`${IMG}/${row.name}`]);
+      apply(await api.setCommodity(fileId, sets), rows.map((row) => `${IMG}/${row.name}`));
+      if (rows.length > 1) actions.toast("success", `Set ${column.name} to ${value} on ${rows.length.toLocaleString()} entries.`);
     } catch (e) {
       actions.toast("error", e instanceof Error ? e.message : String(e));
     } finally {
-      setPending((p) => { const n = new Set(p); n.delete(tag); return n; });
+      setPending((p) => { const n = new Set(p); tags.forEach((t) => n.delete(t)); return n; });
     }
+  };
+
+  const commit = (row: CommodityRow, col: number, value: string) => {
+    const cell = row.cells[col];
+    if (cell && cell.value === value) return;
+    void commitMany([row], col, value);
+  };
+
+  // Shift-click ranges on checkbox columns: the first shift-click toggles a row and becomes the anchor; the next
+  // shift-click gives every row between the two (in the order shown) the anchor's value. Releasing Shift or leaving
+  // the window drops the anchor, so a fresh range needs Shift pressed again.
+  const anchor = useRef<{ row: string; col: number; value: string } | null>(null);
+  const [anchorRow, setAnchorRow] = useState<string | null>(null);
+  useEffect(() => {
+    const drop = () => { anchor.current = null; setAnchorRow(null); };
+    const onKeyUp = (e: globalThis.KeyboardEvent) => { if (e.key === "Shift") drop(); };
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", drop);
+    return () => { window.removeEventListener("keyup", onKeyUp); window.removeEventListener("blur", drop); };
+  }, []);
+
+  const toggle = (row: CommodityRow, col: number, shift: boolean) => {
+    const value = row.cells[col]?.value === "1" ? "0" : "1";
+    const a = anchor.current;
+    const from = shift && a && a.col === col ? visible.findIndex((r) => r.name === a.row) : -1;
+    if (!shift || from < 0) {
+      anchor.current = shift ? { row: row.name, col, value } : null;
+      setAnchorRow(shift ? row.name : null);
+      void commitMany([row], col, value);
+      return;
+    }
+    const to = visible.findIndex((r) => r.name === row.name);
+    const range = visible.slice(Math.min(from, to), Math.max(from, to) + 1).filter((r) => r.cells[col]?.value !== a!.value);
+    // Keep chaining from the row just clicked.
+    anchor.current = { row: row.name, col, value: a!.value };
+    setAnchorRow(row.name);
+    void commitMany(range, col, a!.value);
   };
 
   /** The next editable column after `col` in the same row (Tab), or before it (Shift+Tab). */
@@ -225,7 +262,7 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
     setBusy(true);
     try {
       const r = await api.addCommodity(fileId, { itemId, donor });
-      apply(r, [IMG]);
+      apply({ columns: r.columns, rows: [r.row], file: r.file }, [IMG]);
       const sn = r.row.cells[r.columns.findIndex((c) => c.name.toLowerCase() === "sn")]?.value;
       actions.toast("success", `Added entry ${r.row.name} for item ${itemId}${sn ? ` with SN ${sn}` : ""}.`);
       setNewItem("");
@@ -368,7 +405,9 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
                           cell={row.cells[col]}
                           editing={editing?.row === row.name && editing.col === col}
                           pending={pending.has(`${row.name}/${col}`)}
+                          anchor={anchorRow === row.name && anchor.current?.col === col}
                           onEdit={() => setEditing({ row: row.name, col })}
+                          onToggle={(shift) => toggle(row, col, shift)}
                           onDone={(value, move) => {
                             if (value != null) void commit(row, col, value);
                             if (move) step(row, col, move === "back"); else setEditing(null);
@@ -418,12 +457,16 @@ function ItemIcon({ fileId, id }: { fileId: string; id: number }) {
  * integers (Gender, Class), a number field for other numbers and a text field for strings. A missing value is created
  * with the column's type. Other property types (sub, canvas, ...) are shown but not editable here.
  */
-function Cell({ column, cell, editing, pending, onEdit, onDone }: {
+function Cell({ column, cell, editing, pending, anchor, onEdit, onToggle, onDone }: {
   column: CommodityColumn;
   cell: CommodityCell | null;
   editing: boolean;
   pending: boolean;
+  /** This checkbox starts the current shift-click range. */
+  anchor: boolean;
   onEdit: () => void;
+  /** Checkbox columns: flip the value (`shift` extends a range from the anchor). */
+  onToggle: (shift: boolean) => void;
   /** `value` is null when the edit was cancelled; `move` steps to the next/previous cell (Tab). */
   onDone: (value: string | null, move?: "next" | "back") => void;
 }) {
@@ -441,10 +484,14 @@ function Cell({ column, cell, editing, pending, onEdit, onDone }: {
   if (key === "onsale" && INTEGER.has(type)) {
     const on = cell?.value === "1";
     return (
-      <div role="cell" className={`${base} !justify-center`}>
-        <input type="checkbox" checked={on} disabled={pending} onChange={() => onDone(on ? "0" : "1")}
-          aria-label={on ? "On sale" : "Not on sale"} title={cell ? `OnSale = ${cell.value}` : "No OnSale value yet; ticking creates it"}
-          className="size-4 cursor-pointer accent-accent-600" />
+      // Shift+mousedown would otherwise extend a text selection from the last click to here.
+      <div role="cell" onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }} className={`${base} !justify-center select-none`}>
+        <input type="checkbox" checked={on} disabled={pending}
+          // React fires onChange from the click, so the native event says whether Shift was held.
+          onChange={(e) => onToggle((e.nativeEvent as MouseEvent).shiftKey === true)}
+          aria-label={on ? "On sale" : "Not on sale"}
+          title={`${cell ? `OnSale = ${cell.value}` : "No OnSale value yet; ticking creates it"}. Shift-click two boxes to set every row between.`}
+          className={`size-4 cursor-pointer accent-accent-600 ${anchor ? "rounded-sm outline-2 outline-offset-2 outline-accent-500" : ""}`} />
       </div>
     );
   }

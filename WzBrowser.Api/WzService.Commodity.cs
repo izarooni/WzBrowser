@@ -16,6 +16,8 @@ public record CommoditySetRequest(string Entry, string Property, string Type, st
 /// <param name="Donor">Donor items get SNs from 10000000, regular ones from 20000000.</param>
 public record CommodityAddRequest(int ItemId, bool Donor);
 public record CommodityRowResult(List<CommodityColumn> Columns, CommodityRow Row, OpenedFileDto File);
+/// <param name="Rows">Each entry that was edited, once, as it is now.</param>
+public record CommodityRowsResult(List<CommodityColumn> Columns, List<CommodityRow> Rows, OpenedFileDto File);
 
 /// <summary>Etc.wz's Commodity.img: the Cash Shop catalogue, one numbered sub property per entry.</summary>
 public sealed partial class WzService
@@ -46,28 +48,42 @@ public sealed partial class WzService
         }
     }
 
-    /// <summary>Sets one value, creating the property (as <see cref="CommoditySetRequest.Type"/>) when it's missing.</summary>
-    public CommodityRowResult SetCommodity(string id, CommoditySetRequest req)
+    /// <summary>
+    /// Sets values (one, or many at once such as a shift-click range), creating a property as
+    /// <see cref="CommoditySetRequest.Type"/> when the entry lacks it. Every value is checked before any is stored,
+    /// so a bad one leaves the file unchanged.
+    /// </summary>
+    public CommodityRowsResult SetCommodity(string id, List<CommoditySetRequest> sets)
     {
+        if (sets.Count == 0) throw new ArgumentException("Nothing to set.");
         var entry = GetEtcArchive(id);
         lock (entry.Lock)
         {
             var img = CommodityImage(entry);
-            var item = img[req.Entry] ?? throw new KeyNotFoundException($"Entry '{req.Entry}' not found in {CommodityImg}.");
-            if (item is not WzSubProperty sub) throw new InvalidDataException($"Entry '{req.Entry}' isn't a sub property.");
-
-            var prop = sub[req.Property];
-            if (prop == null)
+            var targets = new List<(WzSubProperty Sub, WzImageProperty? Prop, CommoditySetRequest Req)>(sets.Count);
+            foreach (var req in sets)
             {
+                var item = img[req.Entry] ?? throw new KeyNotFoundException($"Entry '{req.Entry}' not found in {CommodityImg}.");
+                if (item is not WzSubProperty sub) throw new InvalidDataException($"Entry '{req.Entry}' isn't a sub property.");
                 if (string.IsNullOrWhiteSpace(req.Property)) throw new ArgumentException("A property name is required.");
-                sub.AddProperty(prop = NewValueProperty(req.Property, req.Type));
+                var prop = sub[req.Property];
+                // Dry run on a scratch property of the same type: throws for a bad value or a type that can't be edited.
+                SetValue(NewValueProperty(req.Property, prop == null ? req.Type : Describe(prop).Type), req.Value);
+                targets.Add((sub, prop, req));
             }
-            SetValue(prop, req.Value);
-            MarkChanged(sub);
+
+            foreach (var (sub, existing, req) in targets)
+            {
+                var prop = existing ?? sub[req.Property];
+                if (prop == null) sub.AddProperty(prop = NewValueProperty(req.Property, req.Type));
+                SetValue(prop, req.Value);
+                MarkChanged(sub);
+            }
             Touch(entry);
 
             var columns = CommodityColumns(img);
-            return new CommodityRowResult(columns, CommodityRowOf(sub, columns), Describe(id, entry));
+            var rows = targets.Select(t => t.Sub).Distinct().Select(s => CommodityRowOf(s, columns)).ToList();
+            return new CommodityRowsResult(columns, rows, Describe(id, entry));
         }
     }
 

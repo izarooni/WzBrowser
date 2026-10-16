@@ -54,6 +54,9 @@ export interface CommodityColumn { name: string; type: NodeType }
 export interface CommodityTable { columns: CommodityColumn[]; rows: CommodityRow[] }
 /** After an edit: the (possibly grown) column list, the entry as it is now, and the file (now unsaved). */
 export interface CommodityRowResult { columns: CommodityColumn[]; row: CommodityRow; file: OpenedFile }
+/** After setting values: each edited entry once, as it is now. */
+export interface CommodityRowsResult { columns: CommodityColumn[]; rows: CommodityRow[]; file: OpenedFile }
+export interface CommoditySet { entry: string; property: string; type: string; value: string }
 
 export type LookupKind = "npc" | "item" | "mob" | "map" | "skill" | "quest";
 
@@ -145,12 +148,12 @@ export function createApi(base: string) {
     quests: (id: string) => request<QuestSummary[]>(`/api/files/${id}/quests`),
     quest: (id: string, questId: number) => request<QuestDetail>(`/api/files/${id}/quests/${questId}`),
     commodity: (id: string) => request<CommodityTable>(`/api/files/${id}/commodity`),
-    /** Sets `entry/property`, creating it as `type` when the entry doesn't have it. */
-    setCommodity: (id: string, body: { entry: string; property: string; type: string; value: string }) =>
-      request<CommodityRowResult>(`/api/files/${id}/commodity`, {
+    /** Sets each `entry/property`, creating it as `type` when the entry doesn't have it. All or nothing. */
+    setCommodity: (id: string, sets: CommoditySet[]) =>
+      request<CommodityRowsResult>(`/api/files/${id}/commodity`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(sets),
       }),
     /** Adds an entry with default values and a generated SN (donor items 1xxxxxxx, regular 2xxxxxxx). */
     addCommodity: (id: string, body: { itemId: number; donor: boolean }) =>
