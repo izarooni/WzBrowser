@@ -151,7 +151,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <header className="z-30 shrink-0 border-b border-zinc-200/80 bg-white/80 backdrop-blur-md dark:border-zinc-800/80 dark:bg-zinc-950/80">
         <div className="flex h-16 items-center justify-between gap-6 px-6">
           <Link to="/" className="flex items-center gap-3.5">
-            <span className="grid size-9 place-items-center rounded-xl bg-accent-600 text-base font-bold text-white shadow-sm">W</span>
+            <img src="/icon-48.png" alt="" width={36} height={36} className="size-9" />
             <span className="text-lg font-semibold tracking-tight">WzBrowser</span>
           </Link>
           <div className="flex items-center gap-3">

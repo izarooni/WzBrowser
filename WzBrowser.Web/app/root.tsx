@@ -9,7 +9,8 @@ import stylesheet from "./tailwind.css?url";
 
 export const links: LinksFunction = () => [
     { rel: "stylesheet", href: stylesheet },
-    { rel: "icon", type: "image/svg+xml", href: "/icon.svg" },
+    { rel: "icon", href: "/favicon.ico", sizes: "16x16 24x24 32x32 48x48" },
+    { rel: "apple-touch-icon", href: "/icon-192.png" },
     { rel: "manifest", href: "/manifest.webmanifest" },
 ];
 
