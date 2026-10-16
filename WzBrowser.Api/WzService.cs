@@ -14,7 +14,8 @@ public record NodeDto(
     int? Width = null,
     int? Height = null);
 
-/// <param name="Kind">"quest" for a quest archive (QuestInfo.img + Check.img at the root), otherwise "generic".</param>
+/// <param name="Kind">"quest" for a quest archive (QuestInfo.img + Check.img at the root), "etc" for one with
+/// Commodity.img at the root (Etc.wz), otherwise "generic".</param>
 /// <param name="Revision">Changes whenever the file's contents change (paste, delete, revert) so views know to refetch.</param>
 public record OpenedFileDto(string Id, string Name, string Path, string Encryption, int Version, int ChildCount, bool Dirty, string? SavedTo, string Kind, long Revision);
 
@@ -35,7 +36,8 @@ public sealed partial class WzService
 
     private sealed class Entry(WzFile file, string path, string encryption)
     {
-        public WzFile File { get; } = file;
+        /// <summary>Replaced by the newly written file after a save (see <see cref="Save"/>).</summary>
+        public WzFile File { get; set; } = file;
         public string Path { get; } = path;
         public string Encryption { get; } = encryption;
         // MapleLib parses lazily and is not thread safe, so serialise access per file.
@@ -45,7 +47,7 @@ public sealed partial class WzService
         public string? SavedTo { get; set; }
         public string Kind { get; set; } = "generic";
         public long Revision { get; set; } = NextRevision();
-        /// <summary>Lazily created name lookups (String.wz); only used by quest archives.</summary>
+        /// <summary>Lazily created name lookups (String.wz); only used by quest and etc archives.</summary>
         public NameIndex? Names { get; set; }
         /// <summary>
         /// Opened internally (e.g. Item.wz for a tooltip image) and not listed until a link actually opens it.
@@ -121,7 +123,9 @@ public sealed partial class WzService
         var root = file.WzDirectory;
         var entry = new Entry(file, path, version.ToString())
         {
-            Kind = root.GetImageByName("QuestInfo.img") != null && root.GetImageByName("Check.img") != null ? "quest" : "generic",
+            Kind = root.GetImageByName("QuestInfo.img") != null && root.GetImageByName("Check.img") != null ? "quest"
+                : root.GetImageByName(CommodityImg) != null ? "etc"
+                : "generic",
             Hidden = hidden,
         };
         _files[id] = entry;
@@ -440,6 +444,19 @@ public sealed partial class WzService
             Directory.SetCurrentDirectory(System.IO.Path.GetDirectoryName(target)!);
             try { entry.File.SaveToDisk(target); }
             finally { Directory.SetCurrentDirectory(previous); }
+
+            // SaveToDisk unparses every image afterwards, and the edited ones can't be read back from the original,
+            // so they'd show up empty (and a second save would write them empty). Carry on from the file just written.
+            var saved = new WzFile(target, entry.File.Version, entry.File.MapleVersion);
+            var status = saved.ParseWzFile();
+            if (status != WzFileParseStatus.Success)
+            {
+                saved.Dispose();
+                throw new InvalidDataException($"Saved to '{target}', but it couldn't be read back ({status.GetErrorDescription()}). Reopen the file before editing further.");
+            }
+            entry.File.Dispose();
+            entry.File = saved;
+            entry.Revision = NextRevision();
 
             entry.Dirty = false;
             entry.SavedTo = target;

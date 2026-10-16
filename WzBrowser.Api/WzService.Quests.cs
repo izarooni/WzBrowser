@@ -51,7 +51,7 @@ public sealed partial class WzService
     /// <summary>Resolves ids to names. Kinds that can't be resolved (no String.wz) simply come back empty.</summary>
     public Dictionary<string, Dictionary<int, string>> Lookup(string id, LookupRequest req)
     {
-        var entry = GetQuestArchive(id);
+        var entry = GetLinkingArchive(id);
         NameIndex names;
         lock (entry.Lock) names = entry.Names ??= new NameIndex(entry.Path);
 
@@ -65,7 +65,7 @@ public sealed partial class WzService
             ["quest"] = [],
         };
 
-        if (req.Quest is { Count: > 0 })
+        if (req.Quest is { Count: > 0 } && entry.Kind == "quest")
         {
             // Quest names come from the open archive itself, so they reflect unsaved edits too.
             lock (entry.Lock)
@@ -83,6 +83,14 @@ public sealed partial class WzService
     {
         var entry = Get(id);
         if (entry.Kind != "quest") throw new InvalidDataException("This file isn't a quest archive.");
+        return entry;
+    }
+
+    /// <summary>A file whose views link to things in the neighbouring files: a quest archive or Etc.wz.</summary>
+    private Entry GetLinkingArchive(string id)
+    {
+        var entry = Get(id);
+        if (entry.Kind is not ("quest" or "etc")) throw new InvalidDataException("This file doesn't link to other files.");
         return entry;
     }
 

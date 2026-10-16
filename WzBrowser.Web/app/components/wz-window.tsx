@@ -1,6 +1,7 @@
 import { memo, useRef, useState, type PointerEvent } from "react";
 import { MIN_H, MIN_W, useActions, useWorkspaceData, type Win } from "../lib/workspace";
 import { Archive, Download, Minus, Plus, Undo, XMark } from "./icons";
+import { CommodityEditor } from "./commodity-editor";
 import { NodeTree } from "./node-tree";
 import { QuestBrowser } from "./quest-browser";
 
@@ -17,8 +18,10 @@ export const WzWindow = memo(function WzWindow({ win, focused }: { win: Win; foc
   const { files } = useWorkspaceData();
   const file = files[win.fileId];
   const gesture = useRef<Gesture | null>(null);
-  // Quest archives open on the quest browser; the raw tree is one tab away.
-  const [tab, setTab] = useState<"quests" | "raw">("quests");
+  // Quest archives open on the quest browser and Etc.wz on the Commodity table; the raw tree is one tab away.
+  const [tab, setTab] = useState<"main" | "raw">("main");
+  const mainLabel = file?.kind === "quest" ? "Quests" : file?.kind === "etc" ? "Commodity" : null;
+  const openRaw = (path: string) => { setTab("raw"); actions.reveal(win.fileId, path); };
 
   const begin = (e: PointerEvent<HTMLElement>, g: Gesture) => {
     if (e.button !== 0) return;
@@ -114,9 +117,9 @@ export const WzWindow = memo(function WzWindow({ win, focused }: { win: Win; foc
         </button>
       </header>
 
-      {!win.collapsed && file?.kind === "quest" && (
+      {!win.collapsed && mainLabel && (
         <div role="tablist" aria-label="View" className="flex shrink-0 gap-1 border-b border-zinc-100 px-4 pt-2 dark:border-zinc-800">
-          {(["quests", "raw"] as const).map((t) => (
+          {(["main", "raw"] as const).map((t) => (
             <button
               key={t}
               type="button"
@@ -129,23 +132,21 @@ export const WzWindow = memo(function WzWindow({ win, focused }: { win: Win; foc
                   : "border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
               }`}
             >
-              {t === "quests" ? "Quests" : "Raw tree"}
+              {t === "main" ? mainLabel : "Raw tree"}
             </button>
           ))}
         </div>
       )}
-      {/* Both views stay mounted (the inactive one is hidden) so the raw tree keeps its state and can be revealed from the quest view. */}
-      {!win.collapsed && file?.kind === "quest" && (
-        <div className={tab === "quests" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-          <QuestBrowser
-            fileId={win.fileId}
-            revision={file.revision}
-            onOpenRaw={(path) => { setTab("raw"); actions.reveal(win.fileId, path); }}
-          />
+      {/* Both views stay mounted (the inactive one is hidden) so the raw tree keeps its state and can be revealed from the main view. */}
+      {!win.collapsed && mainLabel && (
+        <div className={tab === "main" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+          {file?.kind === "quest"
+            ? <QuestBrowser fileId={win.fileId} revision={file.revision} onOpenRaw={openRaw} />
+            : <CommodityEditor fileId={win.fileId} revision={file!.revision} onOpenRaw={openRaw} />}
         </div>
       )}
       {!win.collapsed && (
-        <div className={file?.kind === "quest" && tab === "quests" ? "hidden" : "flex min-h-0 flex-1 flex-col"}>
+        <div className={mainLabel && tab === "main" ? "hidden" : "flex min-h-0 flex-1 flex-col"}>
           <NodeTree fileId={win.fileId} />
         </div>
       )}

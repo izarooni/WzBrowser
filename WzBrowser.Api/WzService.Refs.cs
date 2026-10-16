@@ -66,7 +66,7 @@ public sealed partial class WzService
 
     private RefLoc? LocateRef(string questId, string kind, int id)
     {
-        var quest = GetQuestArchive(questId);
+        var quest = GetLinkingArchive(questId);
         var dir = System.IO.Path.GetDirectoryName(quest.Path)!;
 
         switch (kind)

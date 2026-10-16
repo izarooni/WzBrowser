@@ -27,8 +27,8 @@ export interface OpenedFile {
   /** In-memory edits not yet saved to a new file. */
   dirty: boolean;
   savedTo: string | null;
-  /** "quest" for a quest archive (QuestInfo.img + Check.img at the root). */
-  kind: "quest" | "generic";
+  /** "quest" for a quest archive (QuestInfo.img + Check.img at the root); "etc" when Commodity.img is at the root. */
+  kind: "quest" | "etc" | "generic";
   /** Changes whenever the file's contents change, so views know to refetch. */
   revision: number;
 }
@@ -46,6 +46,14 @@ export interface QuestDetail {
   say: PropTree | null;
   act: PropTree | null;
 }
+
+export interface CommodityCell { type: NodeType; value: string | null }
+/** One Commodity.img entry. `cells` follow the table's columns; null where the entry lacks that property. */
+export interface CommodityRow { name: string; cells: (CommodityCell | null)[] }
+export interface CommodityColumn { name: string; type: NodeType }
+export interface CommodityTable { columns: CommodityColumn[]; rows: CommodityRow[] }
+/** After an edit: the (possibly grown) column list, the entry as it is now, and the file (now unsaved). */
+export interface CommodityRowResult { columns: CommodityColumn[]; row: CommodityRow; file: OpenedFile }
 
 export type LookupKind = "npc" | "item" | "mob" | "map" | "skill" | "quest";
 
@@ -136,6 +144,21 @@ export function createApi(base: string) {
     search: (id: string, query: string, depth = 3) => request<string[]>(`/api/files/${id}/search?q=${q(query)}&depth=${depth}`),
     quests: (id: string) => request<QuestSummary[]>(`/api/files/${id}/quests`),
     quest: (id: string, questId: number) => request<QuestDetail>(`/api/files/${id}/quests/${questId}`),
+    commodity: (id: string) => request<CommodityTable>(`/api/files/${id}/commodity`),
+    /** Sets `entry/property`, creating it as `type` when the entry doesn't have it. */
+    setCommodity: (id: string, body: { entry: string; property: string; type: string; value: string }) =>
+      request<CommodityRowResult>(`/api/files/${id}/commodity`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    /** Adds an entry with default values and a generated SN (donor items 1xxxxxxx, regular 2xxxxxxx). */
+    addCommodity: (id: string, body: { itemId: number; donor: boolean }) =>
+      request<CommodityRowResult>(`/api/files/${id}/commodity`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
     lookup: (id: string, ids: LookupRequest) =>
       request<LookupResult>(`/api/files/${id}/lookup`, {
         method: "POST",

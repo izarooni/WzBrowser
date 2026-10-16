@@ -19,7 +19,7 @@ Options: `--port N` (or `WZBROWSER_PORT`), `--host ADDR`, `--allow-origin https:
 If the port is busy it uses the next free one. Only `localhost`/loopback origins and origins you allow may call it, because it can browse the local disk.
 
 Endpoints: `GET /api/health`, `GET /api/fs?path=`, `GET|POST /api/files`, `DELETE /api/files/{id}`,
-`GET /api/files/{id}/children?path=`, `/node`, `/png`, `/sound`.
+`GET /api/files/{id}/children?path=`, `/node`, `/png`, `/sound`, `GET|PUT|POST /api/files/{id}/commodity`.
 
 ## Using the workspace
 
@@ -79,6 +79,18 @@ What the stages mean (checked against real data, and shown in the UI):
 | Act | actions when the quest is **accepted** | actions when it is **completed** |
 
 In Act (and Check) an item's direction is decided by the **sign of `count`**, not the stage: a positive count gives the item and a negative count takes it, in both stages.
+
+## Commodity window (Etc.wz)
+
+Opening a file with `Commodity.img` at its root (normally `Etc.wz`) gives a **Commodity** tab for the Cash Shop list; the **Raw tree** tab is next to it.
+
+- One row per entry. The columns are every property name used by any entry, each showing its type (`int`, `string`, …). Click a header to sort (again for descending, a third time for file order). Search matches the entry number, any value, the item id and the item name.
+- Click a value (or focus it and press Enter) to edit it. The input fits the type: whole numbers are checked against the range of `short`/`int`/`long`, `float`/`double` take decimals, strings take any text. **Enter** saves, **Esc** cancels, **Tab** saves and moves to the next value. A `—` cell means the entry lacks that property; editing it adds it with the column's type. Other types (sub, canvas, …) are shown but are edited in the raw tree.
+- `OnSale` is a checkbox. `Gender` (0 male, 1 female, 2 both) and `Class` (0 New, 1 Sale, 2 Hot, 3 Event, 4 none) get a picker.
+- The **Item** column shows the item's icon and name (from `String.wz`, `Character.wz` and `Item.wz` in the same folder) and links to it like the quest view does.
+- **Add entry** asks for an item id and whether it is a donor item. The entry is named one past the highest entry number and gets the defaults [CashCommodities](https://github.com/izarooni/CashCommodities) uses: Count 1, Gender 2, OnSale 1, Period 90, Price 4000, Priority 99, Class 4. Property names follow the spelling the file already uses.
+- The SN is generated the way CashCommodities does it: `10000000` for donor items or `20000000` for regular ones, plus the item's Cash Shop category × `100000`, plus the lowest free number from 1. For example, a regular hat gets the first free `200000xx`.
+- Each row has **Raw** (show it in the raw tree) and delete buttons. Edits work like any other edit: in memory until you save a new file.
 
 ## Web
 

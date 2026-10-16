@@ -107,6 +107,8 @@ interface Actions {
   takePendingReveal: (fileId: string) => string | undefined;
   /** Pans the canvas if the file's window is off screen, and focuses it. */
   showWindow: (fileId: string) => void;
+  /** Records an edit made by a view other than the raw tree: updates the file and refreshes those tree folders. */
+  edited: (file: OpenedFile, reload: string[]) => void;
   /** Follows a link from a quest archive: opens the file holding the item/NPC/mob/map/skill and reveals it there. */
   followRef: (questFileId: string, kind: LookupKind, id: number) => Promise<void>;
   toast: (kind: Toast["kind"], text: string) => void;
@@ -216,8 +218,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const s = stateRef.current;
     const n = s.wins.length % 8;
     const layout = layouts.current[file.id] ?? {
-      // Quest archives show a list beside a detail pane, so they open wider than a plain tree.
-      x: 48 + n * 36 - s.pan.x, y: 32 + n * 36 - s.pan.y, w: file.kind === "quest" ? 980 : 680, h: file.kind === "quest" ? 620 : 560, collapsed: false,
+      // Quest archives show a list beside a detail pane and Etc.wz a wide table, so they open bigger than a plain tree.
+      x: 48 + n * 36 - s.pan.x, y: 32 + n * 36 - s.pan.y, w: file.kind === "generic" ? 680 : 980, h: file.kind === "generic" ? 560 : 620, collapsed: false,
     };
     dispatch({ type: "add", fileId: file.id, layout });
   }, []);
@@ -254,6 +256,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       toast("error", errText(e));
     }
   }, [api, upsert, openFile, reveal, showWindow, toast]);
+
+  const edited = useCallback<Actions["edited"]>((file, reload) => {
+    upsert(file);
+    emit(file.id, { reload });
+  }, [upsert, emit]);
 
   const confirm = useCallback((opts: ConfirmOptions) => new Promise<boolean>((resolve) => setConfirmState({ opts, resolve })), []);
   const answer = (v: boolean) => { confirmState?.resolve(v); setConfirmState(null); };
@@ -341,8 +348,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     tidy: () => dispatch({ type: "tidy" }),
     openPicker: () => setPickerOpen(true),
     paste, deleteNode, save, revert, subscribe, toast,
-    reveal, takePendingReveal, showWindow, followRef,
-  }), [openFile, closeWindow, paste, deleteNode, save, revert, subscribe, toast, reveal, takePendingReveal, showWindow, followRef]);
+    reveal, takePendingReveal, showWindow, followRef, edited,
+  }), [openFile, closeWindow, paste, deleteNode, save, revert, subscribe, toast, reveal, takePendingReveal, showWindow, followRef, edited]);
 
   return (
     <ActionsCtx.Provider value={actions}>

@@ -111,7 +111,11 @@ api.MapPost("/files/{id}/revert", (string id, WzService wz) => wz.Revert(id));
 api.MapGet("/files/{id}/quests", (string id, WzService wz) => wz.Quests(id));
 api.MapGet("/files/{id}/quests/{questId:int}", (string id, int questId, WzService wz) => wz.Quest(id, questId));
 api.MapPost("/files/{id}/lookup", (string id, LookupRequest req, WzService wz) => wz.Lookup(id, req));
-// Links from a quest archive to the things it mentions (items, NPCs, mobs, maps, skills) in the neighbouring files.
+// Etc.wz's Commodity.img (Cash Shop entries): the whole table, set one value, add an entry with a generated SN.
+api.MapGet("/files/{id}/commodity", (string id, WzService wz) => wz.Commodity(id));
+api.MapPut("/files/{id}/commodity", (string id, CommoditySetRequest req, WzService wz) => wz.SetCommodity(id, req));
+api.MapPost("/files/{id}/commodity", (string id, CommodityAddRequest req, WzService wz) => wz.AddCommodity(id, req));
+// Links from a quest archive (or Etc.wz) to the things it mentions (items, NPCs, mobs, maps, skills) in the neighbouring files.
 api.MapPost("/files/{id}/ref/open", (string id, RefOpenRequest req, WzService wz) => wz.OpenRef(id, req));
 api.MapGet("/files/{id}/preview", (string id, string kind, int refId, HttpContext ctx, WzService wz) =>
 {

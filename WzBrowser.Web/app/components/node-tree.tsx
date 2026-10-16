@@ -103,7 +103,8 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
       loadLevel("");
       return;
     }
-    e.reload?.forEach((p) => loadLevel(p, true));
+    // Only folders already fetched need refreshing; the rest load fresh when opened.
+    e.reload?.forEach((p) => { if (levelsRef.current[p]) loadLevel(p, true); });
     if (e.reveal) {
       const target = e.reveal;
       revealRef.current = target;
