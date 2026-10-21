@@ -4,6 +4,7 @@ import { useConnection } from "../lib/connection";
 import { baseName, canPaste, joinPath, parentPath } from "../lib/paths";
 import { dnd, useActions, useWorkspaceData, type ClipItem, type TreeEvent } from "../lib/workspace";
 import { ChevronRight, Copy, Document, ExclamationTriangle, Folder, Music, Photo, Search, XMark } from "./icons";
+import { EDITABLE, invalid } from "../lib/values";
 import { inputClass } from "./ui";
 
 type Level =
@@ -503,6 +504,7 @@ function Detail({ fileId, path, node, fileName, childCount, canPasteHere, onCopy
   onDelete: () => void;
 }) {
   const { api } = useConnection();
+  const ws = useActions();
   const [zoom, setZoom] = useState(1);
   const [imgFailed, setImgFailed] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -518,6 +520,7 @@ function Detail({ fileId, path, node, fileName, childCount, canPasteHere, onCopy
     );
   }
 
+  const isProperty = !NOT_PROPERTY.has(node.type);
   const copyPath = async () => {
     try { await navigator.clipboard.writeText(path); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* clipboard blocked */ }
   };
@@ -527,7 +530,12 @@ function Detail({ fileId, path, node, fileName, childCount, canPasteHere, onCopy
     <aside className={`${shell} space-y-5 p-5`}>
       <div className="space-y-2.5">
         <div className="flex items-start justify-between gap-3">
-          <h3 className="min-w-0 break-words text-base font-semibold">{node.name}</h3>
+          {isProperty ? (
+            <InlineEdit key={`name:${path}`} label="name" value={node.name} check={(v) => (v.trim() ? null : "A name is required.")}
+              onSave={(name) => ws.editNode(fileId, path, { name })} className="min-w-0 flex-1 text-base font-semibold" />
+          ) : (
+            <h3 className="min-w-0 break-words text-base font-semibold">{node.name}</h3>
+          )}
           <span className="shrink-0 rounded-full bg-zinc-100 px-2.5 py-0.5 text-[11px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{node.type}</span>
         </div>
         <button type="button" onClick={copyPath} title="Copy path" className="flex w-full items-start gap-2 text-left font-mono text-[11px] leading-5 text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">
@@ -585,10 +593,82 @@ function Detail({ fileId, path, node, fileName, childCount, canPasteHere, onCopy
       )}
 
       <dl className="grid grid-cols-[auto_1fr] gap-x-5 gap-y-3 text-[13px]">
-        {node.value != null && node.type !== "canvas" && <Field label="Value"><span className="whitespace-pre-wrap break-words font-mono">{node.value}</span></Field>}
+        {EDITABLE.has(node.type) ? (
+          <Field label="Value">
+            <InlineEdit key={`value:${path}:${node.value}`} label="value" value={node.value ?? ""} multiline={node.type === "string"}
+              check={(v) => invalid(node.type, v)} onSave={(value) => ws.editNode(fileId, path, { value })} className="font-mono" />
+          </Field>
+        ) : node.value != null && node.type !== "canvas" && <Field label="Value"><span className="whitespace-pre-wrap break-words font-mono">{node.value}</span></Field>}
         {childCount != null && <Field label="Children"><span className="font-mono">{childCount.toLocaleString()}</span></Field>}
       </dl>
     </aside>
+  );
+}
+
+/** Directories and images can't be renamed (MapleLib indexes them by name); everything below an image can. */
+const NOT_PROPERTY = new Set(["file", "directory", "image"]);
+
+/**
+ * Text that turns into an input when clicked (or focused and Enter/F2 pressed). Enter saves, Esc cancels,
+ * leaving the field saves a valid change. Multiline fields take Shift+Enter for a new line.
+ */
+function InlineEdit({ label, value, multiline = false, check, onSave, className = "" }: {
+  label: string;
+  value: string;
+  multiline?: boolean;
+  /** Why the text can't be saved, or null. */
+  check: (v: string) => string | null;
+  /** Resolves false when the save failed, so the field stays open with the text. */
+  onSave: (v: string) => Promise<boolean>;
+  className?: string;
+}) {
+  const [text, setText] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const problem = text == null ? null : check(text);
+
+  const commit = async () => {
+    if (text == null || busy) return;
+    if (problem || text === value) { setText(null); return; }
+    setBusy(true);
+    const ok = await onSave(text);
+    setBusy(false);
+    if (ok) setText(null);
+  };
+
+  if (text == null) {
+    return (
+      <span role="button" tabIndex={0} title={`Click to edit the ${label}`}
+        onClick={() => setText(value)}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === "F2") { e.preventDefault(); setText(value); } }}
+        className={`-mx-1.5 block cursor-text whitespace-pre-wrap break-words rounded-md px-1.5 outline-none hover:bg-zinc-100 focus-visible:ring-2 focus-visible:ring-accent-500/60 dark:hover:bg-zinc-800 ${className}`}>
+        {value === "" ? <span className="font-sans font-normal italic text-zinc-400">(empty)</span> : value}
+      </span>
+    );
+  }
+
+  const props = {
+    autoFocus: true,
+    value: text,
+    disabled: busy,
+    "aria-label": label,
+    "aria-invalid": !!problem,
+    title: problem ?? `Enter to save${multiline ? ", Shift+Enter for a new line" : ""}, Esc to cancel`,
+    onFocus: (e: { currentTarget: HTMLInputElement | HTMLTextAreaElement }) => e.currentTarget.select(),
+    onChange: (e: { target: { value: string } }) => setText(e.target.value),
+    onBlur: () => void commit(),
+    onKeyDown: (e: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setText(null); }
+      else if (e.key === "Enter" && !(multiline && e.shiftKey)) { e.preventDefault(); if (!problem) void commit(); }
+    },
+    className: `-mx-1.5 block w-[calc(100%+0.75rem)] rounded-md border bg-white px-1.5 py-0.5 outline-2 dark:bg-zinc-950 ${
+      problem ? "border-rose-400 outline-rose-500/30" : "border-accent-400 outline-accent-500/30"
+    } ${className}`,
+  };
+  return (
+    <span className="block space-y-1">
+      {multiline ? <textarea rows={Math.min(8, Math.max(2, text.split("\n").length))} {...props} /> : <input {...props} />}
+      {problem && <span className="block font-sans text-xs font-normal text-rose-600 dark:text-rose-400">{problem}</span>}
+    </span>
   );
 }
 

@@ -27,6 +27,11 @@ public record ObjRefResult(string Path, NodeDto Node, string? Link);
 public record PasteRequest(string SourceId, string SourcePath, string? TargetPath, bool Move);
 public record PasteResult(string Path, NodeDto Node, OpenedFileDto File, OpenedFileDto? SourceFile);
 public record SaveResult(string Path, long Size, OpenedFileDto File);
+/// <param name="Name">New name, or null to keep it.</param>
+/// <param name="Value">New value in the form <see cref="NodeDto.Value"/> shows it, or null to keep it.</param>
+public record NodeEditRequest(string Path, string? Name, string? Value);
+/// <param name="Path">Where the property is now (differs from the request's after a rename).</param>
+public record NodeEditResult(string Path, NodeDto Node, OpenedFileDto File);
 
 /// <summary>Holds opened WZ files and resolves slash-separated paths inside them.</summary>
 public sealed partial class WzService
@@ -415,6 +420,42 @@ public sealed partial class WzService
             ((WzObject)node).Remove();
             Touch(entry);
             return Describe(id, entry);
+        }
+    }
+
+    /// <summary>
+    /// Renames a property and/or sets its value (numbers, strings, vectors as "x, y", UOL paths). Both are checked
+    /// before either is applied, so a bad request leaves the file unchanged.
+    /// </summary>
+    public NodeEditResult EditNode(string id, NodeEditRequest req)
+    {
+        var entry = Get(id);
+        lock (entry.Lock)
+        {
+            var path = Normalize(req.Path);
+            if (Resolve(entry.File, path) is not WzImageProperty prop)
+                throw new InvalidDataException("Only properties can be edited; directories and images can't.");
+
+            var name = req.Name?.Trim();
+            if (name != null && name != prop.Name)
+            {
+                if (name.Length == 0) throw new ArgumentException("A name is required.");
+                if (name.Contains('/')) throw new ArgumentException("A name can't contain '/'.");
+                // Lookups ignore case, so a sibling differing only in case would shadow one of the two.
+                if (prop.Parent is IPropertyContainer pc && pc[name] is { } other && !ReferenceEquals(other, prop))
+                    throw new InvalidDataException($"'{other.Name}' already exists here.");
+            }
+            else name = null;
+            if (name == null && req.Value == null) throw new ArgumentException("Nothing to change.");
+
+            // SetValue parses before storing anything, so a bad value throws before the rename below.
+            if (req.Value != null) SetValue(prop, req.Value);
+            if (name != null) prop.Name = name;
+
+            MarkChanged(prop);
+            Touch(entry);
+            var parent = path.Contains('/') ? path[..path.LastIndexOf('/')] : "";
+            return new NodeEditResult(Join(parent, prop.Name), Describe(prop), Describe(id, entry));
         }
     }
 

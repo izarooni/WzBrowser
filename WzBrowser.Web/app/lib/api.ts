@@ -77,6 +77,11 @@ export interface ObjRef { path: string; node: WzNode; link: string | null }
 
 export interface SaveResult { path: string; size: number; file: OpenedFile }
 
+/** `name`/`value` left out stay as they are. `value` is written the way `WzNode.value` shows it (a vector as "x, y"). */
+export interface NodeEdit { name?: string; value?: string }
+/** `path` is where the property is now, which changes on a rename. */
+export interface NodeEditResult { path: string; node: WzNode; file: OpenedFile }
+
 export interface FsEntry { name: string; path: string; isDirectory: boolean; size: number | null }
 export interface FsListing { path: string; parent: string | null; entries: FsEntry[] }
 
@@ -191,6 +196,13 @@ export function createApi(base: string) {
         body: JSON.stringify(body),
       }),
     deleteNode: (id: string, path: string) => request<OpenedFile>(`/api/files/${id}/node?path=${q(path)}`, { method: "DELETE" }),
+    /** Renames a property and/or sets its value. */
+    editNode: (id: string, path: string, edit: NodeEdit) =>
+      request<NodeEditResult>(`/api/files/${id}/node`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path, ...edit }),
+      }),
     save: (id: string) =>
       request<SaveResult>(`/api/files/${id}/save`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }),
     revert: (id: string) => request<OpenedFile>(`/api/files/${id}/revert`, { method: "POST" }),

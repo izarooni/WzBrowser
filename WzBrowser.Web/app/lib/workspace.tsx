@@ -2,7 +2,7 @@ import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from "@headlessui/re
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { FilePicker } from "../components/file-picker";
 import { buttonPrimary, buttonSecondary } from "../components/ui";
-import type { LookupKind, OpenedFile, WzNode } from "./api";
+import type { LookupKind, NodeEdit, OpenedFile, WzNode } from "./api";
 import { useConnection } from "./connection";
 import { parentPath } from "./paths";
 
@@ -96,6 +96,8 @@ interface Actions {
   openPicker: () => void;
   paste: (targetFileId: string, targetPath: string, src: ClipItem, move: boolean) => Promise<void>;
   deleteNode: (fileId: string, path: string, name: string) => Promise<void>;
+  /** Renames a property and/or sets its value, then selects it at its (possibly new) path. False if it failed. */
+  editNode: (fileId: string, path: string, edit: NodeEdit) => Promise<boolean>;
   save: (fileId: string) => Promise<void>;
   revert: (fileId: string) => Promise<void>;
   subscribe: (fileId: string, cb: (e: TreeEvent) => void) => () => void;
@@ -312,6 +314,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, [api, confirm, upsert, emit, toast]);
 
+  const editNode = useCallback<Actions["editNode"]>(async (fileId, path, edit) => {
+    try {
+      const r = await api.editNode(fileId, path, edit);
+      upsert(r.file);
+      emit(fileId, { reload: [parentPath(path)], reveal: r.path });
+      return true;
+    } catch (e) {
+      toast("error", errText(e));
+      return false;
+    }
+  }, [api, upsert, emit, toast]);
+
   const save = useCallback(async (fileId: string) => {
     try {
       const r = await api.save(fileId);
@@ -349,9 +363,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setPan: (x, y) => dispatch({ type: "pan", x, y }),
     tidy: () => dispatch({ type: "tidy" }),
     openPicker: () => setPickerOpen(true),
-    paste, deleteNode, save, revert, subscribe, toast,
+    paste, deleteNode, editNode, save, revert, subscribe, toast,
     reveal, takePendingReveal, showWindow, followRef, edited, confirm,
-  }), [openFile, closeWindow, paste, deleteNode, save, revert, subscribe, toast, reveal, takePendingReveal, showWindow, followRef, edited, confirm]);
+  }), [openFile, closeWindow, paste, deleteNode, editNode, save, revert, subscribe, toast, reveal, takePendingReveal, showWindow, followRef, edited, confirm]);
 
   return (
     <ActionsCtx.Provider value={actions}>

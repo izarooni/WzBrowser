@@ -105,6 +105,7 @@ api.MapGet("/files/{id}/node",(string id, string? path, WzService wz) => wz.Node
 // Edits live in memory until saved; Save always writes a new file.
 api.MapPost("/files/{id}/paste", (string id, PasteRequest req, WzService wz) => wz.Paste(id, req));
 api.MapDelete("/files/{id}/node", (string id, string path, WzService wz) => wz.Delete(id, path));
+api.MapPatch("/files/{id}/node", (string id, NodeEditRequest req, WzService wz) => wz.EditNode(id, req));
 api.MapPost("/files/{id}/save", (string id, SaveRequest? req, WzService wz) => wz.Save(id, req?.Path));
 api.MapPost("/files/{id}/revert", (string id, WzService wz) => wz.Revert(id));
 // Quest archives (Quest.wz): list, per-quest detail from the four images, and id -> name lookups.

@@ -242,9 +242,28 @@ public sealed partial class WzService
             case WzFloatProperty p: p.Value = Parse<float>(prop, v); break;
             case WzDoubleProperty p: p.Value = Parse<double>(prop, v); break;
             case WzStringProperty p: p.Value = value; break;
-            default: throw new ArgumentException($"{prop.Name} is a {Describe(prop).Type} property and can't be edited here.");
+            case WzVectorProperty p:
+            {
+                var parts = v.Split(',', StringSplitOptions.TrimEntries);
+                if (parts.Length != 2) throw new ArgumentException($"'{v}' isn't a vector for {prop.Name}; write it as \"x, y\".");
+                var (x, y) = (Parse<int>(prop, parts[0]), Parse<int>(prop, parts[1]));
+                p.X.Value = x;
+                p.Y.Value = y;
+                break;
+            }
+            case WzUOLProperty p:
+                if (v.Length == 0) throw new ArgumentException($"{prop.Name} is a link and needs a path.");
+                p.Value = v;
+                // The resolved target is cached on first use and MapleLib has no way to clear it.
+                UolLinkCache.SetValue(p, null);
+                break;
+            default: throw new ArgumentException($"{prop.Name} is a {Describe(prop).Type} property and has no value to edit.");
         }
     }
+
+    private static readonly System.Reflection.FieldInfo UolLinkCache =
+        typeof(WzUOLProperty).GetField("linkVal", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+        ?? throw new MissingFieldException(nameof(WzUOLProperty), "linkVal");
 
     /// <summary>Out-of-range and non-finite values are rejected rather than wrapped or stored.</summary>
     private static T Parse<T>(WzImageProperty prop, string v) where T : INumber<T>

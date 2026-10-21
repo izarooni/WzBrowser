@@ -19,7 +19,7 @@ Options: `--port N` (or `WZBROWSER_PORT`), `--host ADDR`, `--allow-origin https:
 If the port is busy it uses the next free one. Only `localhost`/loopback origins and origins you allow may call it, because it can browse the local disk.
 
 Endpoints: `GET /api/health`, `GET /api/fs?path=`, `GET|POST /api/files`, `DELETE /api/files/{id}`,
-`GET /api/files/{id}/children?path=`, `/node`, `/png`, `/sound`, `GET|PUT|POST /api/files/{id}/commodity`.
+`GET /api/files/{id}/children?path=`, `/node` (`PATCH` renames a property or sets its value), `/png`, `/sound`, `GET|PUT|POST /api/files/{id}/commodity`.
 
 ## Using the workspace
 
@@ -31,9 +31,12 @@ The page is a pannable canvas (drag empty space, or scroll). Each opened file ge
 | Move instead of copy | Hold **Shift** while dropping |
 | Copy / cut / paste | **Ctrl+C / Ctrl+X / Ctrl+V** in the focused window (also buttons in the detail pane). The header shows what's on the clipboard. |
 | Delete | **Delete** (asks first) |
+| Edit a property | In the detail pane, click its name to rename it or its value to change it. **Enter** saves, **Esc** cancels (Shift+Enter adds a line in a string). |
 | Navigate | Arrow keys, Enter/Space to expand, Home/End |
 | Save | **Ctrl+S** or the Save button |
 | Discard edits | Undo button in the window title bar |
+
+Every property can be renamed. Values can be set on `int`, `short`, `long` (range-checked), `float`, `double`, `string`, `vector` (written `x, y`) and `uol` (the link path) properties; sub, canvas, convex, sound and null properties have no value of their own. Directories and `.img` images can't be renamed.
 
 What can go where: directories and `.img` images go into directories or the file root; properties (canvas, sound, sub-properties, values) go into an image or a sub-property/canvas/convex. A name clash gets a `_copy` suffix.
 

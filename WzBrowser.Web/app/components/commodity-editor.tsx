@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState, type FormEvent, type Keyboa
 import type { CommodityCell, CommodityColumn, CommodityRow, CommodityRowsResult, CommodityTable } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { useNames } from "../lib/use-names";
+import { EDITABLE, INTEGER, invalid } from "../lib/values";
 import { useActions } from "../lib/workspace";
 import { Plus, Search, XMark } from "./icons";
 import { RefCtx, RefLink, type RefContext } from "./ref-link";
@@ -14,32 +15,11 @@ const IMG = "Commodity.img";
 /** Stands for the row-selection checkbox column wherever a column index is expected. */
 const SELECT = -1;
 
-const INTEGER = new Set(["int", "short", "long"]);
-const RANGE: Record<string, [bigint, bigint]> = {
-  short: [-32768n, 32767n],
-  int: [-2147483648n, 2147483647n],
-  long: [-9223372036854775808n, 9223372036854775807n],
-};
-const EDITABLE = new Set(["int", "short", "long", "float", "double", "string"]);
-
 // Integer columns whose values are codes; they get a picker (any other value can still be typed in the raw tree).
 const CHOICES: Record<string, [number, string][]> = {
   gender: [[0, "Male"], [1, "Female"], [2, "Both"]],
   class: [[0, "New"], [1, "Sale"], [2, "Hot"], [3, "Event"], [4, "None"]],
 };
-
-/** Why `value` can't be stored as `type`, or null when it can. */
-function invalid(type: string, value: string): string | null {
-  const v = value.trim();
-  if (INTEGER.has(type)) {
-    if (!/^-?\d+$/.test(v)) return `A ${type} must be a whole number.`;
-    const [lo, hi] = RANGE[type];
-    const n = BigInt(v);
-    return n < lo || n > hi ? `A ${type} must be between ${lo} and ${hi}.` : null;
-  }
-  if (type === "float" || type === "double") return /^-?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(v) ? null : `A ${type} must be a number.`;
-  return null;
-}
 
 /**
  * The server orders columns by first appearance, which shifts when a property is added to an early entry.
@@ -549,7 +529,7 @@ function Cell({ column, cell, editing, pending, anchor, onEdit, onToggle, onDone
 }) {
   const type = cell?.type ?? column.type;
   const key = column.name.toLowerCase();
-  const numeric = type !== "string";
+  const numeric = type !== "string" && type !== "uol";
   const editable = EDITABLE.has(type);
   const choices = INTEGER.has(type) ? CHOICES[key] : undefined;
   const base = `flex min-w-0 items-center px-3 ${numeric ? "justify-end font-mono text-xs tabular-nums" : ""} ${pending ? "opacity-50" : ""}`;
@@ -650,7 +630,7 @@ function CellInput({ type, value, numeric, onDone }: {
         onKeyDown={onKeyDown}
         // Leaving with an invalid value drops the edit instead of saving something the file can't hold.
         onBlur={() => finish(problem ? null : text)}
-        inputMode={numeric ? (INTEGER.has(type) ? "numeric" : "decimal") : undefined}
+        inputMode={INTEGER.has(type) ? "numeric" : type === "float" || type === "double" ? "decimal" : undefined}
         aria-invalid={!!problem}
         title={problem ?? "Enter to save, Esc to cancel, Tab for the next value"}
         className={`w-full rounded-md border bg-white px-2 py-1 text-xs outline-2 dark:bg-zinc-950 ${numeric ? "text-right font-mono tabular-nums" : ""} ${
