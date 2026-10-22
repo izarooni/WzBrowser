@@ -12,9 +12,13 @@ Two independent programs:
 MapleLib is pinned as a submodule. Clone with it, and have `git pull` keep it in step:
 
 ```powershell
-git clone --recurse-submodules https://github.com/izarooni/WzBrowser.git
-git config submodule.recurse true    # once per clone; build.bat also sets it
+git -c core.longpaths=true clone --recurse-submodules https://github.com/izarooni/WzBrowser.git
+cd WzBrowser
+git config submodule.recurse true                 # once per clone; build.bat also sets it
+git -C deps/MapleLib config core.longpaths true    # some MapleLib paths exceed Windows' 260-character limit
 ```
+
+(`git config --global core.longpaths true` covers the long paths for every repository instead.)
 
 In an existing clone, `git submodule update --init` fetches it (`build.bat` does this before building).
 

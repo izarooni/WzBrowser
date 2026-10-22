@@ -7,9 +7,12 @@ cd /d "%~dp0"
 
 echo === MapleLib ===
 rem Fetch deps\MapleLib at the pinned commit, and make later `git pull`s update it too.
+rem Some of MapleLib's files are past Windows' 260-character path limit, hence core.longpaths.
 git config submodule.recurse true
-git submodule update --init --recursive
+git config core.longpaths true
+git -c core.longpaths=true submodule update --init --recursive
 if errorlevel 1 goto :failed
+git -C deps\MapleLib config core.longpaths true
 
 echo.
 echo === API (Release) ===
