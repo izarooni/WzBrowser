@@ -27,7 +27,8 @@ export interface OpenedFile {
   /** In-memory edits not yet saved to a new file. */
   dirty: boolean;
   savedTo: string | null;
-  /** "quest" for a quest archive (QuestInfo.img + Check.img at the root); "etc" when Commodity.img is at the root. */
+  /** "quest" for a quest archive (QuestInfo.img + Check.img at the root, or a modular QuestData with one {id}.img per quest);
+   * "etc" when Commodity.img is at the root. */
   kind: "quest" | "etc" | "generic";
   /** Changes whenever the file's contents change, so views know to refetch. */
   revision: number;
@@ -45,6 +46,8 @@ export interface QuestDetail {
   check: PropTree | null;
   say: PropTree | null;
   act: PropTree | null;
+  /** Where each section is in the raw tree: "QuestInfo.img/1000" (classic) or "1000.img/QuestInfo" (modular). */
+  paths: { info: string; check: string; say: string; act: string };
 }
 
 export interface CommodityCell { type: NodeType; value: string | null }
@@ -84,6 +87,8 @@ export interface NodeEditResult { path: string; node: WzNode; file: OpenedFile }
 
 export interface FsEntry { name: string; path: string; isDirectory: boolean; size: number | null }
 export interface FsListing { path: string; parent: string | null; entries: FsEntry[] }
+/** A file a pinned server offers; `name` is its path relative to the library folder. */
+export interface LibraryFile { name: string; path: string; size: number }
 
 export const ENCRYPTIONS = ["Auto", "GMS", "EMS", "BMS", "CLASSIC", "GETFROMZLZ"] as const;
 
@@ -137,8 +142,10 @@ export function createApi(base: string) {
 
   return {
     base,
-    health: () => request<{ status: string; port: number; version: string }>("/api/health"),
+    /** `library`: the server is pinned to a folder, so files come from `library()` and `fs` is refused. */
+    health: () => request<{ status: string; port: number; version: string; library?: boolean }>("/api/health"),
     fs: (path = "") => request<FsListing>(`/api/fs?path=${q(path)}`),
+    library: () => request<LibraryFile[]>("/api/library"),
     files: () => request<OpenedFile[]>("/api/files"),
     open: (path: string, encryption: string) =>
       request<OpenedFile>("/api/files", {

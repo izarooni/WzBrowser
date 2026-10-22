@@ -1,9 +1,9 @@
-import { Dialog, DialogBackdrop, DialogPanel, DialogTitle, Listbox, ListboxButton, ListboxOption, ListboxOptions } from "@headlessui/react";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { ENCRYPTIONS, type FsListing, type OpenedFile } from "../lib/api";
+import { Combobox, ComboboxButton, ComboboxInput, ComboboxOption, ComboboxOptions, Dialog, DialogBackdrop, DialogPanel, DialogTitle, Listbox, ListboxButton, ListboxOption, ListboxOptions } from "@headlessui/react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { ENCRYPTIONS, type FsListing, type LibraryFile, type OpenedFile } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { ArrowUp, Check, ChevronUpDown, Document, Folder, XMark } from "./icons";
-import { buttonSecondary, inputClass } from "./ui";
+import { buttonPrimary, buttonSecondary, inputClass } from "./ui";
 
 const LAST_DIR_KEY = "wzbrowser.lastDir";
 
@@ -51,7 +51,15 @@ export function EncryptionSelect({ value, onChange }: { value: string; onChange:
   );
 }
 
-export function FilePicker({ open, onClose, onOpened }: { open: boolean; onClose: () => void; onOpened: (file: OpenedFile) => void }) {
+interface PickerProps { open: boolean; onClose: () => void; onOpened: (file: OpenedFile) => void }
+
+/** Browses the disk, or, when the server is pinned to a library folder, picks from the files it offers. */
+export function FilePicker(props: PickerProps) {
+  const { library } = useConnection();
+  return library ? <LibraryPicker {...props} /> : <FolderPicker {...props} />;
+}
+
+function FolderPicker({ open, onClose, onOpened }: PickerProps) {
   const { api, status } = useConnection();
   const [listing, setListing] = useState<FsListing | null>(null);
   const [pathInput, setPathInput] = useState("");
@@ -187,6 +195,126 @@ export function FilePicker({ open, onClose, onOpened }: { open: boolean; onClose
               </ul>
             )}
           </div>
+        </DialogPanel>
+      </div>
+    </Dialog>
+  );
+}
+
+/** A pinned server's files in one dropdown; typing narrows it (matches anywhere in the relative path). */
+function LibraryPicker({ open, onClose, onOpened }: PickerProps) {
+  const { api, status } = useConnection();
+  const [files, setFiles] = useState<LibraryFile[] | null>(null);
+  const [selected, setSelected] = useState<LibraryFile | null>(null);
+  const [query, setQuery] = useState("");
+  const [encryption, setEncryption] = useState("Auto");
+  const [opening, setOpening] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open || status !== "online") return;
+    let cancelled = false;
+    setError(null);
+    api.library()
+      .then((list) => { if (!cancelled) setFiles(list); })
+      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); });
+    return () => { cancelled = true; };
+  }, [open, status, api]);
+
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!files) return [];
+    return needle ? files.filter((f) => f.name.toLowerCase().includes(needle)) : files;
+  }, [files, query]);
+
+  const openFile = async (file: LibraryFile | null) => {
+    if (!file) return;
+    setOpening(true);
+    setError(null);
+    try {
+      onOpened(await api.open(file.path, encryption));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setOpening(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} className="relative z-50">
+      <DialogBackdrop transition className="fixed inset-0 bg-zinc-950/40 backdrop-blur-sm transition duration-200 data-[closed]:opacity-0" />
+      <div className="fixed inset-0 flex items-center justify-center p-4 sm:p-6">
+        <DialogPanel
+          transition
+          className="w-full max-w-2xl space-y-6 rounded-2xl border border-zinc-200 bg-white p-8 shadow-xl transition duration-200 data-[closed]:scale-95 data-[closed]:opacity-0 dark:border-zinc-800 dark:bg-zinc-900"
+        >
+          <div className="flex items-start justify-between gap-6">
+            <div className="space-y-2">
+              <DialogTitle className="text-xl font-semibold">Open a WZ file</DialogTitle>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">Pick one of the files this server offers.</p>
+            </div>
+            <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800">
+              <XMark className="size-5" />
+            </button>
+          </div>
+
+          {status !== "online" ? (
+            <p className="py-10 text-center text-sm text-zinc-500">The WzBrowser API isn't reachable. Start WzBrowser.exe, then try again.</p>
+          ) : (
+            <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); openFile(selected); }}>
+              <Combobox value={selected} onChange={setSelected} onClose={() => setQuery("")} disabled={!files || opening}>
+                <div className="relative">
+                  <ComboboxInput
+                    aria-label="File"
+                    autoFocus
+                    displayValue={(f: LibraryFile | null) => f?.name ?? ""}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder={files ? `${files.length} files, type to filter` : "Loading files…"}
+                    spellCheck={false}
+                    className={`${inputClass} pr-10 font-mono`}
+                  />
+                  <ComboboxButton aria-label="Show all files" className="absolute inset-y-0 right-0 flex items-center px-3">
+                    <ChevronUpDown className="size-4 text-zinc-400" />
+                  </ComboboxButton>
+                </div>
+                <ComboboxOptions
+                  anchor="bottom start"
+                  transition
+                  className="z-[60] max-h-80 w-(--input-width) overflow-y-auto rounded-xl border border-zinc-200 bg-white p-2 shadow-lg transition duration-100 [--anchor-gap:6px] empty:invisible focus:outline-none data-[closed]:opacity-0 dark:border-zinc-700 dark:bg-zinc-900"
+                >
+                  {visible.map((f) => (
+                    <ComboboxOption
+                      key={f.path}
+                      value={f}
+                      className="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm data-[focus]:bg-accent-50 dark:data-[focus]:bg-zinc-800"
+                    >
+                      <Document className="size-4 shrink-0 text-accent-500" />
+                      <span className="min-w-0 flex-1 truncate font-mono">{f.name}</span>
+                      <span className="text-xs tabular-nums text-zinc-400">{formatSize(f.size)}</span>
+                      <Check className="invisible size-4 text-accent-600 group-data-[selected]:visible" />
+                    </ComboboxOption>
+                  ))}
+                </ComboboxOptions>
+              </Combobox>
+              {files?.length === 0 && <p className="text-sm text-zinc-500">The library folder has no .wz files.</p>}
+
+              <div className="flex items-center gap-4">
+                <span className="text-sm font-medium text-zinc-600 dark:text-zinc-300">Encryption</span>
+                <div className="w-44"><EncryptionSelect value={encryption} onChange={setEncryption} /></div>
+              </div>
+
+              {error && (
+                <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300">
+                  {error}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3">
+                <button type="button" className={buttonSecondary} onClick={onClose}>Cancel</button>
+                <button type="submit" className={buttonPrimary} disabled={!selected || opening}>{opening ? "Opening…" : "Open"}</button>
+              </div>
+            </form>
+          )}
         </DialogPanel>
       </div>
     </Dialog>

@@ -2,8 +2,10 @@ using System.Net;
 using System.Net.Sockets;
 using WzBrowser.Api;
 
-// Usage: WzBrowser.exe [--host 127.0.0.1] [--port 5178] [--allow-origin https://my.site]...
-//   env: WZBROWSER_PORT, WZBROWSER_ORIGINS (comma separated)
+// Usage: WzBrowser.exe [--host 127.0.0.1] [--port 5178] [--allow-origin https://my.site]... [--root D:\Game\Data]
+//   env: WZBROWSER_PORT, WZBROWSER_ORIGINS (comma separated), WZBROWSER_ROOT
+//   appsettings.json next to the exe: { "WzBrowser": { "Root": "D:\\Game\\Data" } }
+// With a root, only the .wz files under it can be opened (picked from a list), and the disk can't be browsed.
 var argList = args.ToList();
 IEnumerable<string> ArgValues(string name) =>
     argList.Select((a, i) => (a, i)).Where(t => t.a == name && t.i + 1 < argList.Count).Select(t => argList[t.i + 1]);
@@ -17,10 +19,17 @@ var extraOrigins = ArgValues("--allow-origin")
     .Select(o => o.TrimEnd('/'))
     .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-var builder = WebApplication.CreateBuilder(args);
+// Content root = the exe's folder, so appsettings.json is found there whatever the working directory.
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = args, ContentRootPath = AppContext.BaseDirectory });
 builder.WebHost.UseUrls($"http://{host}:{port}");
 builder.Logging.SetMinimumLevel(LogLevel.Warning);
-builder.Services.AddSingleton<WzService>();
+
+var root = new[] { ArgValues("--root").FirstOrDefault(), Environment.GetEnvironmentVariable("WZBROWSER_ROOT"), builder.Configuration["WzBrowser:Root"] }
+    .FirstOrDefault(r => !string.IsNullOrWhiteSpace(r));
+var wzService = new WzService(root);
+if (wzService.Root != null && !Directory.Exists(wzService.Root))
+    Console.WriteLine($"Warning: library folder '{wzService.Root}' doesn't exist.");
+builder.Services.AddSingleton(wzService);
 
 // This API can browse the local disk, so only loopback origins and explicitly allowed origins may call it.
 builder.Services.AddCors(o => o.AddDefaultPolicy(policy => policy
@@ -66,11 +75,17 @@ app.UseCors();
 
 var api = app.MapGroup("/api");
 
-api.MapGet("/health", () => new { status = "ok", port, version = "1.0.0" });
+// `library` tells the web app this server is pinned to a folder: it then lists /library instead of browsing /fs,
+// and keeps its API address fixed.
+api.MapGet("/health", (WzService wz) => new { status = "ok", port, version = "1.0.0", library = wz.Root != null });
+
+// ---- the files a pinned server offers ----
+api.MapGet("/library", (WzService wz) => wz.Library());
 
 // ---- local file system browsing (for the folder / file picker) ----
-api.MapGet("/fs", (string? path) =>
+api.MapGet("/fs", (string? path, WzService wz) =>
 {
+    if (wz.Root != null) throw new UnauthorizedAccessException("This server only offers the files in its library folder.");
     if (string.IsNullOrWhiteSpace(path))
     {
         var drives = DriveInfo.GetDrives().Where(d => d.IsReady)
@@ -142,6 +157,7 @@ api.MapFallback(() => Results.NotFound(new { error = "Unknown API route." }));
 app.MapGet("/", () => Results.Text($"WzBrowser API listening on http://{host}:{port}\nOpen the WzBrowser web app and point it at this address.\n", "text/plain"));
 
 Console.WriteLine($"WzBrowser API listening on http://{host}:{port}  (Ctrl+C to quit)");
+if (wzService.Root != null) Console.WriteLine($"Serving only the .wz files in {wzService.Root}");
 app.Run();
 
 static int FindFreePort(string host, int preferred)

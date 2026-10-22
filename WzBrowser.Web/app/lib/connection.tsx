@@ -8,6 +8,11 @@ interface Connection {
   base: string;
   status: ConnectionStatus;
   apiVersion: string | null;
+  /**
+   * The server is pinned to a library folder: the address can't be changed and files are picked from its list.
+   * Kept from the last successful check, so it survives the server briefly going offline.
+   */
+  library: boolean;
   setBase: (base: string) => void;
   recheck: () => void;
 }
@@ -19,6 +24,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   const [base, setBaseState] = useState(DEFAULT_API_BASE);
   const [status, setStatus] = useState<ConnectionStatus>("checking");
   const [apiVersion, setApiVersion] = useState<string | null>(null);
+  const [library, setLibrary] = useState(false);
   const [tick, setTick] = useState(0);
 
   useEffect(() => setBaseState(loadApiBase()), []);
@@ -34,6 +40,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         setStatus("online");
         setApiVersion(h.version);
+        setLibrary(!!h.library);
       } catch {
         if (cancelled) return;
         setStatus("offline");
@@ -47,16 +54,17 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   }, [api, tick]);
 
   const setBase = useCallback((next: string) => {
+    if (library) return;
     const normalized = normalizeBase(next);
     saveApiBase(normalized);
     setBaseState(normalized);
-  }, []);
+  }, [library]);
 
   const recheck = useCallback(() => setTick((t) => t + 1), []);
 
   const value = useMemo(
-    () => ({ api, base, status, apiVersion, setBase, recheck }),
-    [api, base, status, apiVersion, setBase, recheck],
+    () => ({ api, base, status, apiVersion, library, setBase, recheck }),
+    [api, base, status, apiVersion, library, setBase, recheck],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

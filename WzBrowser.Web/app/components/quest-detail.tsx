@@ -389,7 +389,7 @@ export const QuestDetailView = memo(function QuestDetailView({ fileId, revision,
     return <div className="space-y-4 p-6">{[24, 56, 40].map((h, i) => <div key={i} className="skeleton rounded-xl bg-zinc-100 dark:bg-zinc-800" style={{ height: h * 3 }} />)}</div>;
   }
 
-  const { info, check, say, act } = current;
+  const { info, check, say, act, paths } = current;
   const stageOf = (t: PropTree | null, n: number) => child(t, String(n));
   const journal = [0, 1, 2].map((n) => ({ n, node: child(info, String(n)) })).filter((j) => j.node && j.node.value);
   const flags = Object.keys(INFO_FLAGS).filter((k) => int(child(info, k)) === 1);
@@ -416,7 +416,7 @@ export const QuestDetailView = memo(function QuestDetailView({ fileId, revision,
           </div>
         </header>
 
-        <Card title="About" subtitle="QuestInfo.img: journal text and summaries" onOpenRaw={() => onOpenRaw(`QuestInfo.img/${questId}`)}>
+        <Card title="About" subtitle={`${paths.info}: journal text and summaries`} onOpenRaw={() => onOpenRaw(paths.info)}>
           {journal.length === 0 && summaries.length === 0 && <p className="text-sm text-zinc-400">No text.</p>}
           <div className="grid gap-4 @2xl:grid-cols-3">
             {journal.map(({ n, node }) => (
@@ -437,7 +437,7 @@ export const QuestDetailView = memo(function QuestDetailView({ fileId, revision,
           )}
         </Card>
 
-        <Card title="Requirements" subtitle="Check.img: what the player must satisfy" onOpenRaw={() => onOpenRaw(`Check.img/${questId}`)}>
+        <Card title="Requirements" subtitle={`${paths.check}: what the player must satisfy`} onOpenRaw={() => onOpenRaw(paths.check)}>
           <div className="grid gap-4 @2xl:grid-cols-2">
             {[0, 1].map((n) => {
               const s = stageOf(check, n);
@@ -445,10 +445,10 @@ export const QuestDetailView = memo(function QuestDetailView({ fileId, revision,
             })}
           </div>
           {extraStages(check).map((s) => <StageCard key={s.name} stage={s.name} label={`Entry “${s.name}”`} empty={!kids(s).length}><dl className="space-y-3">{kids(s).map((c) => <Generic key={c.name} node={c} />)}</dl></StageCard>)}
-          {!check && <p className="text-sm text-zinc-400">This quest has no entry in Check.img.</p>}
+          {!check && <p className="text-sm text-zinc-400">Nothing at {paths.check}.</p>}
         </Card>
 
-        <Card title="Dialogue" subtitle="Say.img: what the NPC says" onOpenRaw={() => onOpenRaw(`Say.img/${questId}`)}>
+        <Card title="Dialogue" subtitle={`${paths.say}: what the NPC says`} onOpenRaw={() => onOpenRaw(paths.say)}>
           <div className="grid gap-4">
             {[0, 1].map((n) => {
               const s = stageOf(say, n);
@@ -456,10 +456,10 @@ export const QuestDetailView = memo(function QuestDetailView({ fileId, revision,
             })}
           </div>
           {extraStages(say).map((s) => <StageCard key={s.name} stage={s.name} label={`Entry “${s.name}”`} empty={!kids(s).length}><Dialogue node={s} /></StageCard>)}
-          {!say && <p className="text-sm text-zinc-400">This quest has no entry in Say.img.</p>}
+          {!say && <p className="text-sm text-zinc-400">Nothing at {paths.say}.</p>}
         </Card>
 
-        <Card title="Actions" subtitle="Act.img: what happens in-game. A negative count takes an item, a positive one gives it." onOpenRaw={() => onOpenRaw(`Act.img/${questId}`)}>
+        <Card title="Actions" subtitle={`${paths.act}: what happens in-game. A negative count takes an item, a positive one gives it.`} onOpenRaw={() => onOpenRaw(paths.act)}>
           <div className="grid gap-4 @2xl:grid-cols-2">
             {[0, 1].map((n) => {
               const s = stageOf(act, n);
@@ -467,7 +467,7 @@ export const QuestDetailView = memo(function QuestDetailView({ fileId, revision,
             })}
           </div>
           {extraStages(act).map((s) => <StageCard key={s.name} stage={s.name} label={`Entry “${s.name}”`} empty={!kids(s).length}><dl className="space-y-3">{kids(s).map((c) => <Generic key={c.name} node={c} />)}</dl></StageCard>)}
-          {!act && <p className="text-sm text-zinc-400">This quest has no entry in Act.img.</p>}
+          {!act && <p className="text-sm text-zinc-400">Nothing at {paths.act}.</p>}
         </Card>
       </div>
     </NamesCtx.Provider>

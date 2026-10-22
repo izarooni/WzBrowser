@@ -14,7 +14,8 @@ public record NodeDto(
     int? Width = null,
     int? Height = null);
 
-/// <param name="Kind">"quest" for a quest archive (QuestInfo.img + Check.img at the root), "etc" for one with
+/// <param name="Kind">"quest" for a quest archive (QuestInfo.img + Check.img at the root, or the modular QuestData with
+/// one {id}.img per quest), "etc" for one with
 /// Commodity.img at the root (Etc.wz), otherwise "generic".</param>
 /// <param name="Revision">Changes whenever the file's contents change (paste, delete, revert) so views know to refetch.</param>
 public record OpenedFileDto(string Id, string Name, string Path, string Encryption, int Version, int ChildCount, bool Dirty, string? SavedTo, string Kind, long Revision);
@@ -33,9 +34,35 @@ public record NodeEditRequest(string Path, string? Name, string? Value);
 /// <param name="Path">Where the property is now (differs from the request's after a rename).</param>
 public record NodeEditResult(string Path, NodeDto Node, OpenedFileDto File);
 
+/// <param name="Name">Path relative to the library folder, e.g. "Quest/QuestData/QuestData_000.wz".</param>
+public record LibraryFile(string Name, string Path, long Size);
+
 /// <summary>Holds opened WZ files and resolves slash-separated paths inside them.</summary>
-public sealed partial class WzService
+/// <param name="root">When set, only .wz files inside this folder can be opened or saved to (see <see cref="Library"/>).</param>
+public sealed partial class WzService(string? root = null)
 {
+    /// <summary>The library folder this server is pinned to, or null when any file on disk may be opened.</summary>
+    public string? Root { get; } = root == null ? null : System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(root));
+
+    /// <summary>True when <paramref name="fullPath"/> may be read or written: always, unless the server is pinned to a folder.</summary>
+    internal bool InRoot(string fullPath) =>
+        Root == null || fullPath.StartsWith(Root + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Every .wz file under <see cref="Root"/>, by relative path. A modular folder's index stub ({name}.wz beside
+    /// {name}_000.wz) is left out, since the data is in the parts.
+    /// </summary>
+    public List<LibraryFile> Library()
+    {
+        if (Root == null) throw new InvalidDataException("This server isn't pinned to a folder.");
+        if (!Directory.Exists(Root)) throw new DirectoryNotFoundException($"Library folder not found: {Root}");
+        return Directory.EnumerateFiles(Root, "*.wz", SearchOption.AllDirectories)
+            .Where(f => !File.Exists(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(f)!, System.IO.Path.GetFileNameWithoutExtension(f) + "_000.wz")))
+            .Select(f => new LibraryFile(System.IO.Path.GetRelativePath(Root, f).Replace('\\', '/'), f, new FileInfo(f).Length))
+            .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     private static long _revisionCounter;
     private static long NextRevision() => Interlocked.Increment(ref _revisionCounter);
 
@@ -51,6 +78,8 @@ public sealed partial class WzService
         public bool Dirty { get; set; }
         public string? SavedTo { get; set; }
         public string Kind { get; set; } = "generic";
+        /// <summary>A quest archive in the modular layout: {id}.img/QuestInfo instead of QuestInfo.img/{id}.</summary>
+        public bool ModularQuests { get; set; }
         public long Revision { get; set; } = NextRevision();
         /// <summary>Lazily created name lookups (String.wz); only used by quest and etc archives.</summary>
         public NameIndex? Names { get; set; }
@@ -75,6 +104,7 @@ public sealed partial class WzService
     public OpenedFileDto Open(string path, string? encryption, bool hidden = false)
     {
         path = System.IO.Path.GetFullPath(path);
+        if (!InRoot(path)) throw new UnauthorizedAccessException("Only files in this server's library folder can be opened.");
         if (!File.Exists(path)) throw new FileNotFoundException("WZ file not found.", path);
 
         var id = Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(
@@ -126,11 +156,13 @@ public sealed partial class WzService
         if (file == null) throw new InvalidDataException($"Could not open WZ file ({lastError}).");
 
         var root = file.WzDirectory;
+        var modularQuests = IsModularQuestArchive(root);
         var entry = new Entry(file, path, version.ToString())
         {
-            Kind = root.GetImageByName("QuestInfo.img") != null && root.GetImageByName("Check.img") != null ? "quest"
+            Kind = modularQuests || root.GetImageByName("QuestInfo.img") != null && root.GetImageByName("Check.img") != null ? "quest"
                 : root.GetImageByName(CommodityImg) != null ? "etc"
                 : "generic",
+            ModularQuests = modularQuests,
             Hidden = hidden,
         };
         _files[id] = entry;
@@ -478,6 +510,7 @@ public sealed partial class WzService
             else
             {
                 target = System.IO.Path.GetFullPath(outPath);
+                if (!InRoot(target)) throw new UnauthorizedAccessException("Files can only be saved inside this server's library folder.");
                 if (File.Exists(target)) throw new InvalidDataException($"'{target}' already exists; this app never overwrites files.");
             }
 

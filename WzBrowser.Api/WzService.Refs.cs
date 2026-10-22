@@ -8,7 +8,8 @@ public record RefOpenResult(OpenedFileDto File, string Path);
 
 /// <summary>
 /// Turns "item 1042003", "npc 2100", ... into the node that holds it in the neighbouring WZ files
-/// (Character.wz, Item.wz, Npc.wz, Mob.wz, Map.wz, Skill.wz), opening them in the background when needed.
+/// (Character.wz, Item.wz, Npc.wz, Mob.wz, Map.wz, Skill.wz, or their folders in a modular install), opening them in
+/// the background when needed.
 /// </summary>
 public sealed partial class WzService
 {
@@ -66,51 +67,63 @@ public sealed partial class WzService
 
     private RefLoc? LocateRef(string questId, string kind, int id)
     {
-        var quest = GetLinkingArchive(questId);
-        var dir = System.IO.Path.GetDirectoryName(quest.Path)!;
+        var archive = GetLinkingArchive(questId).Path;
 
         switch (kind)
         {
             case "npc":
-                return InSibling(dir, "Npc.wz", (e, root) => Img(root, $"{id}.img", $"{id:D7}.img") is { } img ? img.Name : null);
+                return InSibling(archive, "Npc", "", (e, root) => Img(root, $"{id}.img", $"{id:D7}.img")?.Name);
             case "mob":
-                return InSibling(dir, "Mob.wz", (e, root) => Img(root, $"{id:D7}.img", $"{id}.img") is { } img ? img.Name : null);
+                return InSibling(archive, "Mob", "", (e, root) => Img(root, $"{id:D7}.img", $"{id}.img")?.Name);
             case "map":
-                return InSibling(dir, "Map.wz", (e, root) =>
-                    root.GetDirectoryByName("Map")?.GetDirectoryByName($"Map{id / 100000000}") is { } d
-                    && Img(d, $"{id:D9}.img") is { } img ? $"Map/{d.Name}/{img.Name}" : null);
+                return InSibling(archive, "Map", $"Map/Map{id / 100000000}", (e, dir) => Img(dir, $"{id:D9}.img")?.Name);
             case "skill":
-                return InSibling(dir, "Skill.wz", (e, root) =>
-                {
-                    var img = Img(root, $"{id / 10000}.img", $"{id / 10000:D3}.img");
-                    return img == null ? null : $"{img.Name}/skill/{id}";
-                });
+                return InSibling(archive, "Skill", "", (e, root) =>
+                    Img(root, $"{id / 10000}.img", $"{id / 10000:D3}.img") is { } img ? $"{img.Name}/skill/{id}" : null);
             case "item" when id / 1000000 == 1:
-                return InSibling(dir, "Character.wz", (e, root) =>
-                    (e.EquipIndex ??= BuildEquipIndex(root)).TryGetValue(id, out var p) ? p : null);
+                // Equipment is spread over category folders (Cap, Coat, ...): directories inside a classic Character.wz,
+                // separate folders of parts in a modular install.
+                foreach (var category in WzLayout.Subfolders(archive, "Character").Prepend(""))
+                    if (InSibling(archive, "Character", category, (e, dir) =>
+                            (e.EquipIndex ??= BuildEquipIndex(dir)).TryGetValue(id, out var p) ? p : null) is { } hit)
+                        return hit;
+                return null;
             case "item":
-                return InSibling(dir, "Item.wz", (e, root) => LocateItem(root, id));
+                return LocateItem(archive, id);
             default:
                 return null;
         }
     }
 
-    /// <summary>Opens `fileName` next to the quest archive (hidden if it isn't open yet) and runs the finder against it.</summary>
-    private RefLoc? InSibling(string dir, string fileName, Func<Entry, WzDirectory, string?> find)
+    /// <summary>
+    /// Opens the file holding what a classic install keeps at `{top}.wz/{dir}` (hidden if it isn't open yet) and runs the
+    /// finder against that directory; the finder returns a path relative to it. A modular folder's parts are tried in turn.
+    /// </summary>
+    private RefLoc? InSibling(string archivePath, string top, string dir, Func<Entry, WzDirectory, string?> find)
     {
-        var path = System.IO.Path.Combine(dir, fileName);
-        if (!File.Exists(path)) return null;
-
-        OpenedFileDto dto;
-        try { dto = Open(path, null, hidden: true); }
-        catch { return null; }
-
-        var entry = Get(dto.Id);
-        lock (entry.Lock)
+        if (WzLayout.Find(archivePath, top, dir) is not var (files, rest)) return null;
+        foreach (var path in files)
         {
-            var found = find(entry, entry.File.WzDirectory);
-            return found == null ? null : new RefLoc(dto.Id, found);
+            OpenedFileDto dto;
+            try { dto = Open(path, null, hidden: true); }
+            catch { continue; }
+
+            var entry = Get(dto.Id);
+            lock (entry.Lock)
+            {
+                // Build the prefix from the directories' own names so the path matches the tree's spelling.
+                var node = entry.File.WzDirectory;
+                var prefix = "";
+                foreach (var segment in rest.Split('/', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    node = node?.GetDirectoryByName(segment);
+                    if (node == null) break;
+                    prefix = Join(prefix, node.Name);
+                }
+                if (node != null && find(entry, node) is { } found) return new RefLoc(dto.Id, Join(prefix, found));
+            }
         }
+        return null;
     }
 
     private static WzImage? Img(WzDirectory dir, params string[] names)
@@ -121,19 +134,16 @@ public sealed partial class WzService
     }
 
     /// <summary>Item.wz groups by category (Consume/Install/Etc/Cash), then by the first four digits of the id.</summary>
-    private static string? LocateItem(WzDirectory root, int id)
+    private RefLoc? LocateItem(string archivePath, int id)
     {
         var category = (id / 1000000) switch { 2 => "Consume", 3 => "Install", 4 => "Etc", 5 => "Cash", _ => null };
         if (category == null) return null;
         var node = $"{id:D8}";
 
-        if (root.GetDirectoryByName(category) is { } dir && Img(dir, $"{id / 10000:D4}.img") is { } img && img[node] != null)
-            return $"{category}/{img.Name}/{node}";
-
-        // Pets live in Pet/<id>.img rather than in the Cash groups.
-        if (root.GetDirectoryByName("Pet") is { } pets && Img(pets, $"{id}.img") is { } pet)
-            return $"Pet/{pet.Name}";
-        return null;
+        return InSibling(archivePath, "Item", category, (e, dir) =>
+                   Img(dir, $"{id / 10000:D4}.img") is { } img && img[node] != null ? $"{img.Name}/{node}" : null)
+               // Pets live in Pet/<id>.img rather than in the Cash groups.
+               ?? InSibling(archivePath, "Item", "Pet", (e, dir) => Img(dir, $"{id}.img")?.Name);
     }
 
     /// <summary>Equipment images are named by full id ("01002008.img") and spread over category folders.</summary>

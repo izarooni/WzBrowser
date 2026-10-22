@@ -5,24 +5,22 @@ using MapleLib.WzLib.WzProperties;
 namespace WzBrowser.Api;
 
 /// <summary>
-/// Resolves ids (NPC, mob, item, map, skill) to display names using the String.wz that sits next to a quest archive.
-/// String.wz is loaded as a private, read-only handle that is never listed as an open file, and each kind is built
-/// the first time it is asked for. When there is no String.wz every lookup just returns nothing.
+/// Resolves ids (NPC, mob, item, map, skill) to display names using the String.wz that sits next to a quest archive
+/// (or, in a modular install, the parts in Data/String). These are loaded as private, read-only handles that are never
+/// listed as open files, and each kind is built the first time it is asked for. Without them every lookup returns nothing.
 /// </summary>
 public sealed class NameIndex : IDisposable
 {
-    private readonly string _stringWzPath;
+    private readonly List<string> _stringWzPaths;
     private readonly object _lock = new();
     private readonly Dictionary<string, Dictionary<int, string>> _kinds = new();
-    private WzFile? _file;
-    private bool _loadAttempted;
+    private List<WzFile>? _files;
 
-    public NameIndex(string questWzPath)
+    /// <param name="allowed">Which files may be read (a server pinned to a folder reads nothing outside it).</param>
+    public NameIndex(string questWzPath, Func<string, bool> allowed)
     {
-        _stringWzPath = Path.Combine(Path.GetDirectoryName(questWzPath) ?? "", "String.wz");
+        _stringWzPaths = (WzLayout.Find(questWzPath, "String", "")?.Files ?? []).Where(allowed).ToList();
     }
-
-    public bool Available => File.Exists(_stringWzPath);
 
     public Dictionary<int, string> Resolve(string kind, IEnumerable<int> ids)
     {
@@ -42,40 +40,42 @@ public sealed class NameIndex : IDisposable
         var names = new Dictionary<int, string>();
         _kinds[kind] = names; // cache even when empty so a missing String.wz isn't re-probed on every request
 
-        var file = Open();
-        if (file == null) return names;
-
-        switch (kind)
-        {
-            case "npc": Collect(file, "Npc.img", names); break;
-            case "mob": Collect(file, "Mob.img", names); break;
-            case "skill": Collect(file, "Skill.img", names); break;
-            case "map": Collect(file, "Map.img", names, isMap: true); break;
-            case "item":
-                // Equipment is grouped by category (Eqp.img/Eqp/Cap/...), so Collect recurses through non-numeric nodes.
-                foreach (var img in new[] { "Eqp.img", "Consume.img", "Ins.img", "Etc.img", "Cash.img" })
-                    Collect(file, img, names);
-                break;
-        }
+        foreach (var file in Open())
+            switch (kind)
+            {
+                case "npc": Collect(file, "Npc.img", names); break;
+                case "mob": Collect(file, "Mob.img", names); break;
+                case "skill": Collect(file, "Skill.img", names); break;
+                case "map": Collect(file, "Map.img", names, isMap: true); break;
+                case "item":
+                    // Equipment is grouped by category (Eqp.img/Eqp/Cap/...), so Collect recurses through non-numeric nodes.
+                    foreach (var img in new[] { "Eqp.img", "Consume.img", "Ins.img", "Etc.img", "Cash.img" })
+                        Collect(file, img, names);
+                    break;
+            }
         return names;
     }
 
-    private WzFile? Open()
+    /// <summary>The String files that could be read; a broken one is skipped rather than failing every lookup.</summary>
+    private List<WzFile> Open()
     {
-        if (_file != null || _loadAttempted) return _file;
-        _loadAttempted = true;
-        if (!Available) return null;
-        try
+        if (_files != null) return _files;
+        _files = [];
+        foreach (var path in _stringWzPaths)
         {
-            var version = WzTool.DetectMapleVersion(_stringWzPath, out var gameVersion);
-            var file = new WzFile(_stringWzPath, gameVersion, version);
-            if (file.ParseWzFile() != WzFileParseStatus.Success) { file.Dispose(); return null; }
-            return _file = file;
+            try
+            {
+                var version = WzTool.DetectMapleVersion(path, out var gameVersion);
+                var file = new WzFile(path, gameVersion, version);
+                if (file.ParseWzFile() == WzFileParseStatus.Success) _files.Add(file);
+                else file.Dispose();
+            }
+            catch
+            {
+                // unreadable part: names from it just stay unresolved
+            }
         }
-        catch
-        {
-            return null;
-        }
+        return _files;
     }
 
     private static void Collect(WzFile file, string imageName, Dictionary<int, string> into, bool isMap = false)
@@ -117,8 +117,8 @@ public sealed class NameIndex : IDisposable
     {
         lock (_lock)
         {
-            _file?.Dispose();
-            _file = null;
+            foreach (var f in _files ?? []) f.Dispose();
+            _files = null;
             _kinds.Clear();
         }
     }

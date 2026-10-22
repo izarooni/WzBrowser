@@ -15,8 +15,20 @@ dotnet publish -c Release -o ..\dist     # -> dist\WzBrowser.exe (single file, r
 dist\WzBrowser.exe                       # listens on http://127.0.0.1:5178
 ```
 
-Options: `--port N` (or `WZBROWSER_PORT`), `--host ADDR`, `--allow-origin https://my.site` (repeatable, or `WZBROWSER_ORIGINS`).
+Options: `--port N` (or `WZBROWSER_PORT`), `--host ADDR`, `--allow-origin https://my.site` (repeatable, or `WZBROWSER_ORIGINS`), `--root FOLDER`.
 If the port is busy it uses the next free one. Only `localhost`/loopback origins and origins you allow may call it, because it can browse the local disk.
+
+### Pinning the server to a folder
+
+Set a library folder with `--root D:\Game\Data`, `WZBROWSER_ROOT`, or an `appsettings.json` next to the exe:
+
+```json
+{ "WzBrowser": { "Root": "D:\\Game\\Data" } }
+```
+
+The server then only opens `.wz` files inside that folder (and its subfolders), only saves inside it, and refuses `/api/fs`.
+`GET /api/library` lists the files (a modular folder's `Name.wz` index stub is left out, since the data is in `Name_000.wz`), and `/api/health` reports `"library": true`.
+The web app sees that: its API address becomes read-only, and **Open file…** shows a dropdown of the library's files (type to filter) instead of the folder browser.
 
 Endpoints: `GET /api/health`, `GET /api/fs?path=`, `GET|POST /api/files`, `DELETE /api/files/{id}`,
 `GET /api/files/{id}/children?path=`, `/node` (`PATCH` renames a property or sets its value), `/png`, `/sound`, `GET|PUT|POST /api/files/{id}/commodity`.
@@ -46,11 +58,20 @@ Drag and drop needs a mouse (HTML5 drag events); on touch devices use the copy/p
 
 ## Quest window
 
-Opening a quest archive (any file whose root has `QuestInfo.img` and `Check.img`, normally `Quest.wz`) gives a **Quests** tab instead of the raw tree; the **Raw tree** tab is one click away and still supports drag, copy, paste and save.
+Opening a quest archive gives a **Quests** tab instead of the raw tree; the **Raw tree** tab is one click away and still supports drag, copy, paste and save.
+
+Two layouts are recognised:
+
+| Layout | File | Where a quest's sections are |
+|---|---|---|
+| Classic | `Quest.wz` (root has `QuestInfo.img` and `Check.img`) | `QuestInfo.img/1000`, `Check.img/1000`, `Say.img/1000`, `Act.img/1000` |
+| Modular | `Data/Quest/QuestData/QuestData_000.wz` (root has one `{id}.img` per quest) | `1000.img/QuestInfo`, `1000.img/Check`, `1000.img/Say`, `1000.img/Act` |
+
+In a modular install the neighbouring files are found in their own folders under `Data` (`Data/String/String_000.wz`, `Data/Npc/Npc_000.wz`, `Data/Item/Etc/Etc_000.wz`, `Data/Character/Weapon/Weapon_000.wz`, `Data/Map/Map/Map1/Map1_000.wz`, ...). Mobs and skills that only exist in `Data/Packs/*.ms` can't be linked.
 
 - The list shows every quest as `{id} - {name}`. Search by id or name; arrow keys, PageUp/PageDown, Home and End move through it.
 - Selecting a quest shows, from the four images: **About** (QuestInfo: name, group, journal text, summaries), **Requirements** (Check), **Dialogue** (Say) and **Actions** (Act). Each card has a *Raw tree* button that jumps to that node.
-- Ids are turned into names (NPCs, items, mobs, maps, skills, other quests) using the `String.wz` in the same folder. Without it, plain ids are shown.
+- Ids are turned into names (NPCs, items, mobs, maps, skills, other quests) using the `String.wz` in the same folder (or `Data/String` in a modular install). Without it, plain ids are shown.
 - Dialogue renders MapleStory's `#b #r #g` colours, `#e` bold, `#p/#t/#o/#m` names and `#L` choices.
 
 ### Links and hover pictures
@@ -67,7 +88,7 @@ Everything the quest view mentions is a link, including the names inside dialogu
 | Skill | `Skill.wz`, e.g. `100.img/skill/1001004` |
 | Quest | that quest in the same window (a **Back** button appears so you can retrace a chain of prerequisites) |
 
-Clicking opens the target file in its own window (or brings it to the front if it is already open, panning the canvas if it was off screen) and selects the node in its raw tree. The files are looked up next to `Quest.wz`; one that isn't there gives an error toast.
+Clicking opens the target file in its own window (or brings it to the front if it is already open, panning the canvas if it was off screen) and selects the node in its raw tree. The files are looked up next to `Quest.wz` (or under `Data` for a modular install); one that isn't there gives an error toast.
 
 Hovering a link shows a picture when there is one: the item's icon, the NPC/mob's standing sprite, the skill icon, or a map's minimap. Quests have no picture, so they get no tooltip.
 
