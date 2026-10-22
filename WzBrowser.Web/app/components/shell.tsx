@@ -55,7 +55,7 @@ export function StatusPill({ onClick }: { onClick?: () => void }) {
 }
 
 function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { base, setBase, status, apiVersion, library, recheck } = useConnection();
+  const { base, setBase, status, apiVersion, fixedAddress, recheck } = useConnection();
   const [draft, setDraft] = useState(base);
   useEffect(() => { if (open) setDraft(base); }, [open, base]);
 
@@ -87,19 +87,19 @@ function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void 
 
           <form
             className="space-y-6"
-            onSubmit={(e) => { e.preventDefault(); if (!library) save(draft); }}
+            onSubmit={(e) => { e.preventDefault(); if (!fixedAddress) save(draft); }}
           >
             <label className="block space-y-2.5">
               <span className="text-sm font-medium">API address</span>
               <input
-                value={library ? base : draft}
+                value={fixedAddress ? base : draft}
                 onChange={(e) => setDraft(e.target.value)}
-                readOnly={library}
+                readOnly={fixedAddress}
                 spellCheck={false}
                 placeholder={DEFAULT_API_BASE}
-                className={`${inputClass} font-mono ${library ? "cursor-default opacity-70" : ""}`}
+                className={`${inputClass} font-mono ${fixedAddress ? "cursor-default opacity-70" : ""}`}
               />
-              {library && <p className="text-xs text-zinc-500 dark:text-zinc-400">This server is set up to serve its own folder of files, so the address is fixed.</p>}
+              {fixedAddress && <p className="text-xs text-zinc-500 dark:text-zinc-400">This page talks to the server it came from, or one set up to serve its own folder of files, so the address is fixed.</p>}
             </label>
 
             <div className="rounded-xl bg-zinc-50 p-5 text-sm leading-6 text-zinc-600 dark:bg-zinc-950 dark:text-zinc-400">
@@ -116,7 +116,7 @@ function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void 
             </div>
 
             <div className="flex items-center justify-end gap-3 pt-2">
-              {library ? (
+              {fixedAddress ? (
                 <button type="button" className={buttonSecondary} onClick={onClose}>Close</button>
               ) : (
                 <>
@@ -151,7 +151,7 @@ function ClipboardChip() {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const { status } = useConnection();
+  const { status, readOnly } = useConnection();
   const { openPicker } = useActions();
 
   return (
@@ -163,6 +163,11 @@ export function AppShell({ children }: { children: ReactNode }) {
             <span className="text-lg font-semibold tracking-tight">WzBrowser</span>
           </Link>
           <div className="flex items-center gap-3">
+            {readOnly && (
+              <span title="Changes can only be made on the server's own computer" className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+                View only
+              </span>
+            )}
             <ClipboardChip />
             <button type="button" className={`${buttonPrimary} !py-2`} disabled={status !== "online"} onClick={openPicker}>Open file…</button>
             <StatusPill onClick={() => setSettingsOpen(true)} />

@@ -5,23 +5,16 @@ using WzBrowser.Api;
 // Usage: WzBrowser.exe [--host 127.0.0.1] [--port 5178] [--allow-origin https://my.site]... [--root D:\Game\Data]
 //   env: WZBROWSER_PORT, WZBROWSER_ORIGINS (comma separated), WZBROWSER_ROOT
 //   appsettings.json next to the exe: { "WzBrowser": { "Root": "D:\\Game\\Data" } }
-// With a root, only the .wz files under it can be opened (picked from a list), and the disk can't be browsed.
+// With a root, only the .wz files under it can be opened (picked from a list), and the disk can't be browsed. That
+// makes it safe to share: it then listens on every network interface (unless --host says otherwise), accepts any
+// origin, and lets other computers view (but not change) the files.
+// A wwwroot folder next to the exe (the built web app; build.bat puts it there) is served at /.
 var argList = args.ToList();
 IEnumerable<string> ArgValues(string name) =>
     argList.Select((a, i) => (a, i)).Where(t => t.a == name && t.i + 1 < argList.Count).Select(t => argList[t.i + 1]);
 
-var host = ArgValues("--host").FirstOrDefault() ?? "127.0.0.1";
-var requestedPort = int.TryParse(ArgValues("--port").FirstOrDefault() ?? Environment.GetEnvironmentVariable("WZBROWSER_PORT"), out var p) ? p : 5178;
-var port = FindFreePort(host, requestedPort);
-
-var extraOrigins = ArgValues("--allow-origin")
-    .Concat((Environment.GetEnvironmentVariable("WZBROWSER_ORIGINS") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-    .Select(o => o.TrimEnd('/'))
-    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-// Content root = the exe's folder, so appsettings.json is found there whatever the working directory.
+// Content root = the exe's folder, so appsettings.json and wwwroot are found there whatever the working directory.
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = args, ContentRootPath = AppContext.BaseDirectory });
-builder.WebHost.UseUrls($"http://{host}:{port}");
 builder.Logging.SetMinimumLevel(LogLevel.Warning);
 
 var root = new[] { ArgValues("--root").FirstOrDefault(), Environment.GetEnvironmentVariable("WZBROWSER_ROOT"), builder.Configuration["WzBrowser:Root"] }
@@ -30,11 +23,23 @@ var wzService = new WzService(root);
 if (wzService.Root != null && !Directory.Exists(wzService.Root))
     Console.WriteLine($"Warning: library folder '{wzService.Root}' doesn't exist.");
 builder.Services.AddSingleton(wzService);
+var shared = wzService.Root != null;
 
-// This API can browse the local disk, so only loopback origins and explicitly allowed origins may call it.
+var host = ArgValues("--host").FirstOrDefault() ?? (shared ? "0.0.0.0" : "127.0.0.1");
+var requestedPort = int.TryParse(ArgValues("--port").FirstOrDefault() ?? Environment.GetEnvironmentVariable("WZBROWSER_PORT"), out var p) ? p : 5178;
+var port = FindFreePort(host, requestedPort);
+builder.WebHost.UseUrls($"http://{host}:{port}");
+
+var extraOrigins = ArgValues("--allow-origin")
+    .Concat((Environment.GetEnvironmentVariable("WZBROWSER_ORIGINS") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+    .Select(o => o.TrimEnd('/'))
+    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+// Unpinned, this API can browse the local disk, so only loopback origins and explicitly allowed origins may call it.
+// Pinned to a library folder it can only show those files, so any page may.
 builder.Services.AddCors(o => o.AddDefaultPolicy(policy => policy
     .SetIsOriginAllowed(origin =>
-        extraOrigins.Contains(origin.TrimEnd('/')) ||
+        shared || extraOrigins.Contains(origin.TrimEnd('/')) ||
         (Uri.TryCreate(origin, UriKind.Absolute, out var u) && (u.IsLoopback || u.Host == "localhost")))
     .AllowAnyHeader()
     .AllowAnyMethod()
@@ -73,11 +78,44 @@ app.Use(async (ctx, next) =>
 
 app.UseCors();
 
+// Other computers may look but not touch: the open files and their unsaved edits are shared by everyone, and saving
+// writes to the server's disk. Opening files and following links only add files to the shared list, so they're allowed.
+static bool IsRemote(HttpContext ctx) => ctx.Connection.RemoteIpAddress is { } ip && !IPAddress.IsLoopback(ip);
+var remoteAllowed = new System.Text.RegularExpressions.Regex(@"^/api/files(/[^/]+/(lookup|ref/open))?/?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+app.Use(async (ctx, next) =>
+{
+    var method = ctx.Request.Method;
+    if (IsRemote(ctx) && !(HttpMethods.IsGet(method) || HttpMethods.IsHead(method) || HttpMethods.IsOptions(method))
+        && !(HttpMethods.IsPost(method) && remoteAllowed.IsMatch(ctx.Request.Path.Value ?? "")))
+    {
+        ctx.Response.StatusCode = 403;
+        await ctx.Response.WriteAsJsonAsync(new { error = "View only: changes can only be made on the server's own computer." });
+        return;
+    }
+    await next();
+});
+
+// The built web app, when it sits next to the exe. Served from here, it uses this server as its API.
+var web = Directory.Exists(builder.Environment.WebRootPath);
+if (web)
+{
+    app.UseDefaultFiles();
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        // The service worker and the page must always be fresh, or a rebuilt app never reaches the browser.
+        OnPrepareResponse = c =>
+        {
+            if (c.File.Name is "index.html" or "sw.js") c.Context.Response.Headers.CacheControl = "no-cache";
+        },
+    });
+}
+
 var api = app.MapGroup("/api");
 
 // `library` tells the web app this server is pinned to a folder: it then lists /library instead of browsing /fs,
-// and keeps its API address fixed.
-api.MapGet("/health", (WzService wz) => new { status = "ok", port, version = "1.0.0", library = wz.Root != null });
+// and keeps its API address fixed. `readOnly`: this caller is on another computer and may only view.
+api.MapGet("/health", (WzService wz, HttpContext ctx) =>
+    new { status = "ok", port, version = "1.0.0", library = wz.Root != null, readOnly = IsRemote(ctx) });
 
 // ---- the files a pinned server offers ----
 api.MapGet("/library", (WzService wz) => wz.Library());
@@ -154,10 +192,12 @@ api.MapGet("/files/{id}/sound", (string id, string path, WzService wz) =>
 });
 api.MapFallback(() => Results.NotFound(new { error = "Unknown API route." }));
 
-app.MapGet("/", () => Results.Text($"WzBrowser API listening on http://{host}:{port}\nOpen the WzBrowser web app and point it at this address.\n", "text/plain"));
+if (web) app.MapFallbackToFile("index.html");
+else app.MapGet("/", () => Results.Text($"WzBrowser API listening on http://{host}:{port}\nOpen the WzBrowser web app and point it at this address.\n", "text/plain"));
 
 Console.WriteLine($"WzBrowser API listening on http://{host}:{port}  (Ctrl+C to quit)");
-if (wzService.Root != null) Console.WriteLine($"Serving only the .wz files in {wzService.Root}");
+if (wzService.Root != null) Console.WriteLine($"Serving only the .wz files in {wzService.Root}; other computers can view them.");
+if (web) Console.WriteLine($"Web app: http://{(host is "0.0.0.0" or "::" ? Dns.GetHostName() : host)}:{port}/");
 app.Run();
 
 static int FindFreePort(string host, int preferred)

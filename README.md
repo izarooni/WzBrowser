@@ -45,6 +45,16 @@ The server then only opens `.wz` files inside that folder (and its subfolders), 
 `GET /api/library` lists the files (a modular folder's `Name.wz` index stub is left out, since the data is in `Name_000.wz`), and `/api/health` reports `"library": true`.
 The web app sees that: its API address becomes read-only, and **Open file…** shows a dropdown of the library's files (type to filter) instead of the folder browser.
 
+### Viewing from other computers
+
+A pinned server can only show its library, so it is shared on the network:
+
+- It listens on every interface (`0.0.0.0`) unless `--host` says otherwise, and any web page may call it. Allow the port through Windows Firewall.
+- `build.bat` copies the web app into `dist\wwwroot`, and the exe serves it, so others just open `http://<server>:5178/`. A page served this way always uses that server as its API.
+- Other computers are **view only**: they can open library files, read quests and follow links, but can't edit, save, revert or close files (`/api/health` reports `"readOnly": true` and the header shows *View only*). Open files and unsaved edits are shared by everyone, so changes are made on the server's own computer.
+
+There is no login: anyone who can reach the port can view the library.
+
 Endpoints: `GET /api/health`, `GET /api/fs?path=`, `GET|POST /api/files`, `DELETE /api/files/{id}`,
 `GET /api/files/{id}/children?path=`, `/node` (`PATCH` renames a property or sets its value), `/png`, `/sound`, `GET|PUT|POST /api/files/{id}/commodity`.
 

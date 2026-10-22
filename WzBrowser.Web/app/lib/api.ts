@@ -142,8 +142,11 @@ export function createApi(base: string) {
 
   return {
     base,
-    /** `library`: the server is pinned to a folder, so files come from `library()` and `fs` is refused. */
-    health: () => request<{ status: string; port: number; version: string; library?: boolean }>("/api/health"),
+    /**
+     * `library`: the server is pinned to a folder, so files come from `library()` and `fs` is refused.
+     * `readOnly`: this computer isn't the server's own, so it may view but not change anything.
+     */
+    health: () => request<{ status: string; port: number; version: string; library?: boolean; readOnly?: boolean }>("/api/health"),
     fs: (path = "") => request<FsListing>(`/api/fs?path=${q(path)}`),
     library: () => request<LibraryFile[]>("/api/library"),
     files: () => request<OpenedFile[]>("/api/files"),
