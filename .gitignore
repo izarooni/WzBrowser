@@ -3,5 +3,4 @@ obj/
 dist/
 node_modules/
 build/
-deps/
 /WzBrowser.Api/.vs

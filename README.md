@@ -4,8 +4,19 @@ Two independent programs:
 
 | Project | What it is |
 |---|---|
-| `WzBrowser.Api` | C# (.NET 10, Windows) API using [MapleLib](https://github.com/lastbattle/MapleLib) (cloned to `deps/MapleLib`) to read local `.wz` files. Publishes as one self-contained exe. |
+| `WzBrowser.Api` | C# (.NET 10, Windows) API using [MapleLib](https://github.com/lastbattle/MapleLib) (a git submodule at `deps/MapleLib`) to read local `.wz` files. Publishes as one self-contained exe. |
 | `WzBrowser.Web` | Remix (SPA mode) + Tailwind frontend. Static files only, so host it anywhere. Works offline once loaded (service worker). |
+
+## Getting the source
+
+MapleLib is pinned as a submodule. Clone with it, and have `git pull` keep it in step:
+
+```powershell
+git clone --recurse-submodules https://github.com/izarooni/WzBrowser.git
+git config submodule.recurse true    # once per clone; build.bat also sets it
+```
+
+In an existing clone, `git submodule update --init` fetches it (`build.bat` does this before building).
 
 ## API
 
