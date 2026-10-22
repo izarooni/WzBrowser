@@ -45,15 +45,16 @@ The server then only opens `.wz` files inside that folder (and its subfolders), 
 `GET /api/library` lists the files (a modular folder's `Name.wz` index stub is left out, since the data is in `Name_000.wz`), and `/api/health` reports `"library": true`.
 The web app sees that: its API address becomes read-only, and **Open file…** shows a dropdown of the library's files (type to filter) instead of the folder browser.
 
-### Viewing from other computers
+### Sharing a library through a hosted web app
 
-A pinned server can only show its library, so it is shared on the network:
+The API only ever listens on `127.0.0.1` (unless `--host` says otherwise) and never serves the web app. To let other people browse a pinned library, host the web app (see [Web](#web)) and have the same web server forward `/api/` to the API, e.g. with IIS URL Rewrite + ARR or nginx `proxy_pass http://127.0.0.1:5178;`. Then point the web app at its own origin with a `config.json` next to `index.html`:
 
-- It listens on every interface (`0.0.0.0`) unless `--host` says otherwise, and any web page may call it. Allow the port through Windows Firewall.
-- `build.bat` copies the web app into `dist\wwwroot`, and the exe serves it, so others just open `http://<server>:5178/`. A page served this way always uses that server as its API.
-- Other computers are **view only**: they can open library files, read quests and follow links, but can't edit, save, revert or close files (`/api/health` reports `"readOnly": true` and the header shows *View only*). Open files and unsaved edits are shared by everyone, so changes are made on the server's own computer.
+```json
+{ "apiBase": "/" }
+```
 
-There is no login: anyone who can reach the port can view the library.
+- Requests that arrive through a proxy (they carry `X-Forwarded-For`, `Forwarded`, `X-Real-IP` or `Via`) or from another computer are **view only**: they can open library files, read quests and follow links, but can't edit, save, revert or close files. `/api/health` reports `"readOnly": true` and the header shows *View only*. Open files and unsaved edits are shared by everyone, so changes are made on the server itself, by calling the API at `http://127.0.0.1:5178` directly. **Make sure the proxy sends one of those headers** (IIS ARR and most proxies send `X-Forwarded-For`; in nginx add `proxy_set_header X-Forwarded-For $remote_addr;`).
+- There is no login: anyone who can reach the site can view the library.
 
 Endpoints: `GET /api/health`, `GET /api/fs?path=`, `GET|POST /api/files`, `DELETE /api/files/{id}`,
 `GET /api/files/{id}/children?path=`, `/node` (`PATCH` renames a property or sets its value), `/png`, `/sound`, `GET|PUT|POST /api/files/{id}/commodity`.
@@ -152,7 +153,13 @@ npm run build      # static site in build/client (includes sw.js)
 npm run preview    # serve build/client on :4173 to try it
 ```
 
-The app talks to `http://127.0.0.1:5178` by default. Change it in the UI (sliders icon) or at build time with `VITE_API_URL`.
+The app talks to `http://127.0.0.1:5178` by default. To change the default for a deployment, put a `config.json` next to `index.html` in the hosted files (no rebuild needed):
+
+```json
+{ "apiBase": "https://wz-api.example.com" }
+```
+
+A path such as `"/"` means this site's own origin (an API proxied under its `/api/`). Without `config.json`, the default is `VITE_API_URL` at build time, else `http://127.0.0.1:5178`. Each visitor can still change the address in the UI (sliders icon), which overrides the default for their browser, except when the server is pinned to a library folder.
 If you host the site remotely, start the exe with `--allow-origin <your site origin>`.
 The host only serves static files; WZ data never passes through it.
 

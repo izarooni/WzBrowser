@@ -1,11 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { createApi, DEFAULT_API_BASE, loadApiBase, normalizeBase, saveApiBase, type Api } from "./api";
+import { createApi, DEFAULT_API_BASE, loadApiBase, loadDefaultApiBase, normalizeBase, saveApiBase, type Api } from "./api";
 
 export type ConnectionStatus = "checking" | "online" | "offline";
 
 interface Connection {
   api: Api;
   base: string;
+  /** This deployment's default address (config.json's apiBase, or the built-in one). */
+  defaultBase: string;
   status: ConnectionStatus;
   apiVersion: string | null;
   /**
@@ -13,8 +15,6 @@ interface Connection {
    * Kept from the last successful check, so it survives the server briefly going offline.
    */
   library: boolean;
-  /** The address can't be changed: the server is pinned, or it served this page and so is the API to use. */
-  fixedAddress: boolean;
   /** This computer may only view: the server is another machine, and edits can only be made on its own. */
   readOnly: boolean;
   setBase: (base: string) => void;
@@ -30,22 +30,19 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   const [apiVersion, setApiVersion] = useState<string | null>(null);
   const [library, setLibrary] = useState(false);
   const [readOnly, setReadOnly] = useState(false);
-  const [served, setServed] = useState(false);
+  const [defaultBase, setDefaultBase] = useState(DEFAULT_API_BASE);
   const [ready, setReady] = useState(false);
   const [tick, setTick] = useState(0);
 
-  // A page served by the WzBrowser API itself (http://server:5178/) talks to that server, whatever was saved before.
-  // Anywhere else the same-origin request fails (404, or an HTML page that isn't JSON) and the saved address is used.
+  // Don't poll until the deployment's default is known, or the built-in one would flash "offline" first.
   useEffect(() => {
     let cancelled = false;
-    createApi(location.origin).health()
-      .then((h) => h?.status === "ok", () => false)
-      .then((own) => {
-        if (cancelled) return;
-        setServed(own);
-        setBaseState(own ? location.origin : loadApiBase());
-        setReady(true);
-      });
+    loadDefaultApiBase().then((d) => {
+      if (cancelled) return;
+      setDefaultBase(d);
+      setBaseState(loadApiBase(d));
+      setReady(true);
+    });
     return () => { cancelled = true; };
   }, []);
 
@@ -76,17 +73,17 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   }, [api, tick, ready]);
 
   const setBase = useCallback((next: string) => {
-    if (library || served) return;
-    const normalized = normalizeBase(next);
-    saveApiBase(normalized);
+    if (library) return;
+    const normalized = normalizeBase(next, defaultBase);
+    saveApiBase(normalized, defaultBase);
     setBaseState(normalized);
-  }, [library, served]);
+  }, [library, defaultBase]);
 
   const recheck = useCallback(() => setTick((t) => t + 1), []);
 
   const value = useMemo(
-    () => ({ api, base, status, apiVersion, library, fixedAddress: library || served, readOnly, setBase, recheck }),
-    [api, base, status, apiVersion, library, served, readOnly, setBase, recheck],
+    () => ({ api, base, defaultBase, status, apiVersion, library, readOnly, setBase, recheck }),
+    [api, base, defaultBase, status, apiVersion, library, readOnly, setBase, recheck],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

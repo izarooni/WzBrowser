@@ -30,14 +30,9 @@ call npm run build
 if errorlevel 1 ( popd & goto :failed )
 popd
 
-rem The exe serves the web app from wwwroot beside it (open http://<server>:5178/).
-if exist dist\wwwroot rmdir /s /q dist\wwwroot
-xcopy /e /i /q WzBrowser.Web\build\client dist\wwwroot >nul
-if errorlevel 1 goto :failed
-
 echo.
 echo Done.
-echo   API: %~dp0dist\WzBrowser.exe  (serves the web app too)
+echo   API: %~dp0dist\WzBrowser.exe
 echo   Web: %~dp0WzBrowser.Web\build\client
 exit /b 0
 

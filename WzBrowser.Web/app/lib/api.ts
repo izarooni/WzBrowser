@@ -1,6 +1,7 @@
-// All traffic goes straight from the browser to the WzBrowser API exe on the user's machine.
-// The host serving this web app is never in the path.
+// All traffic goes straight from the browser to the WzBrowser API exe on the user's machine, unless the host
+// configures an address of its own (see loadDefaultApiBase), e.g. a reverse proxy in front of a shared library.
 
+/** The built-in default address: VITE_API_URL at build time, else the exe's own default. */
 export const DEFAULT_API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:5178";
 const STORAGE_KEY = "wzbrowser.apiBase";
 
@@ -92,27 +93,48 @@ export interface LibraryFile { name: string; path: string; size: number }
 
 export const ENCRYPTIONS = ["Auto", "GMS", "EMS", "BMS", "CLASSIC", "GETFROMZLZ"] as const;
 
-export function loadApiBase(): string {
+/**
+ * The default address for this deployment: `apiBase` in /config.json next to index.html (editable after a build,
+ * e.g. `{ "apiBase": "/" }` for an API proxied under this site's own /api), else {@link DEFAULT_API_BASE}.
+ */
+export async function loadDefaultApiBase(): Promise<string> {
   try {
-    return localStorage.getItem(STORAGE_KEY) || DEFAULT_API_BASE;
+    const res = await fetch("/config.json", { cache: "no-store" });
+    if (res.ok) {
+      const config = await res.json();
+      if (typeof config?.apiBase === "string" && config.apiBase.trim()) return normalizeBase(config.apiBase, DEFAULT_API_BASE);
+    }
   } catch {
-    return DEFAULT_API_BASE;
+    /* no config.json (or not JSON): use the built-in default */
+  }
+  return DEFAULT_API_BASE;
+}
+
+/** The address the user saved, else `fallback` (the deployment's default). */
+export function loadApiBase(fallback: string): string {
+  try {
+    return localStorage.getItem(STORAGE_KEY) || fallback;
+  } catch {
+    return fallback;
   }
 }
 
-export function saveApiBase(base: string) {
+/** Saving the default clears the saved value, so a later change to the deployment's default reaches this browser. */
+export function saveApiBase(base: string, defaultBase: string) {
   try {
-    if (base === DEFAULT_API_BASE) localStorage.removeItem(STORAGE_KEY);
+    if (base === defaultBase) localStorage.removeItem(STORAGE_KEY);
     else localStorage.setItem(STORAGE_KEY, base);
   } catch {
     /* storage unavailable: setting just won't persist */
   }
 }
 
-export function normalizeBase(input: string): string {
+/** A full address without a trailing slash. A path ("/", "/wz") is on this site's own origin. */
+export function normalizeBase(input: string, defaultBase: string): string {
   let v = input.trim();
-  if (!v) return DEFAULT_API_BASE;
-  if (!/^https?:\/\//i.test(v)) v = "http://" + v;
+  if (!v) return defaultBase;
+  if (v.startsWith("/")) v = location.origin + v;
+  else if (!/^https?:\/\//i.test(v)) v = "http://" + v;
   return v.replace(/\/+$/, "");
 }
 

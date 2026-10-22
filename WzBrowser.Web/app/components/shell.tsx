@@ -55,7 +55,7 @@ export function StatusPill({ onClick }: { onClick?: () => void }) {
 }
 
 function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { base, setBase, status, apiVersion, fixedAddress, recheck } = useConnection();
+  const { base, defaultBase, setBase, status, apiVersion, library, recheck } = useConnection();
   const [draft, setDraft] = useState(base);
   useEffect(() => { if (open) setDraft(base); }, [open, base]);
 
@@ -87,19 +87,19 @@ function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void 
 
           <form
             className="space-y-6"
-            onSubmit={(e) => { e.preventDefault(); if (!fixedAddress) save(draft); }}
+            onSubmit={(e) => { e.preventDefault(); if (!library) save(draft); }}
           >
             <label className="block space-y-2.5">
               <span className="text-sm font-medium">API address</span>
               <input
-                value={fixedAddress ? base : draft}
+                value={library ? base : draft}
                 onChange={(e) => setDraft(e.target.value)}
-                readOnly={fixedAddress}
+                readOnly={library}
                 spellCheck={false}
-                placeholder={DEFAULT_API_BASE}
-                className={`${inputClass} font-mono ${fixedAddress ? "cursor-default opacity-70" : ""}`}
+                placeholder={defaultBase}
+                className={`${inputClass} font-mono ${library ? "cursor-default opacity-70" : ""}`}
               />
-              {fixedAddress && <p className="text-xs text-zinc-500 dark:text-zinc-400">This page talks to the server it came from, or one set up to serve its own folder of files, so the address is fixed.</p>}
+              {library && <p className="text-xs text-zinc-500 dark:text-zinc-400">This server is set up to serve its own folder of files, so the address is fixed.</p>}
             </label>
 
             <div className="rounded-xl bg-zinc-50 p-5 text-sm leading-6 text-zinc-600 dark:bg-zinc-950 dark:text-zinc-400">
@@ -116,11 +116,11 @@ function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void 
             </div>
 
             <div className="flex items-center justify-end gap-3 pt-2">
-              {fixedAddress ? (
+              {library ? (
                 <button type="button" className={buttonSecondary} onClick={onClose}>Close</button>
               ) : (
                 <>
-                  <button type="button" className={buttonSecondary} onClick={() => save(DEFAULT_API_BASE)}>Reset to default</button>
+                  <button type="button" className={buttonSecondary} onClick={() => save(defaultBase)}>Reset to default</button>
                   <button type="submit" className={buttonPrimary}>Save</button>
                 </>
               )}

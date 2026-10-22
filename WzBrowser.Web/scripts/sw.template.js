@@ -3,7 +3,8 @@
  * Purpose: once the app has loaded, keep it loading with no network and no host.
  * It caches ONLY this site's own static files. It never touches requests to other origins,
  * so calls to the local WzBrowser API (a different origin) go straight from the page to the exe.
- * When the exe serves this page itself, its /api/ requests are same-origin and are left alone too.
+ * When the host proxies the API under this site's /api/, those requests are left alone too, and so is
+ * config.json, which the host may edit at any time.
  */
 const CACHE = "wzbrowser-__VERSION__";
 const PRECACHE = __PRECACHE__;
@@ -28,7 +29,7 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // API and everything else: hands off
-  if (url.pathname.startsWith("/api/")) return; // the API serving this page itself: always live
+  if (url.pathname.startsWith("/api/") || url.pathname === "/config.json") return; // always live
 
   // Page navigations (any client-side route): serve the cached shell, refresh it in the background.
   if (req.mode === "navigate") {
