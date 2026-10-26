@@ -121,6 +121,13 @@ export interface MobLocation { id: number; name: string | null; maps: number[]; 
 /** `mapNames`: map id -> "Street : Map" for every map listed. */
 export interface MobLocations { mobs: MobLocation[]; mapNames: Record<string, string> }
 
+/** A mob in a map: `count` spawn points in its life, or 0 when only Etc's MobLocation.img lists it there. */
+export interface MapMob { id: number; count: number }
+/** A map with the mobs that spawn in it and the NPCs standing in it. `name` is "Street : Map". */
+export interface MapInfo { id: number; name: string | null; mobs: MapMob[]; npcs: number[] }
+/** `mobNames`/`npcNames`: id -> name for every mob and NPC in any map. */
+export interface Maps { maps: MapInfo[]; mobNames: Record<string, string>; npcNames: Record<string, string> }
+
 /** A quest an NPC hands out (`starts`) and/or completes (`ends`). `archive` is the quest archive's library name. */
 export interface NpcQuest { id: number; name: string; archive: string; starts: boolean; ends: boolean }
 /** An NPC that at least one quest in the library starts or ends at. */
@@ -206,9 +213,10 @@ export function createApi(base: string) {
      * `skills`: the library has skill data, so `skills()` has something to show.
      * `mobs`: the library has Mob data, so `mobs()` has something to show.
      * `mobLocations`: the library's Etc has MobLocation.img, so `mobLocations()` has something to show.
+     * `maps`: the library has Map files, so `maps()` has something to show.
      * `npcs`: the library has a quest archive, so `npcQuests()` has something to show.
      */
-    health: () => request<{ status: string; port: number; version: string; library?: boolean; readOnly?: boolean; browseOnly?: boolean; skills?: boolean; mobs?: boolean; mobLocations?: boolean; npcs?: boolean }>("/api/health"),
+    health: () => request<{ status: string; port: number; version: string; library?: boolean; readOnly?: boolean; browseOnly?: boolean; skills?: boolean; mobs?: boolean; mobLocations?: boolean; maps?: boolean; npcs?: boolean }>("/api/health"),
     fs: (path = "") => request<FsListing>(`/api/fs?path=${q(path)}`),
     library: () => request<LibraryFile[]>("/api/library"),
     /** Every job's skills in the library, ordered by job id. */
@@ -220,6 +228,8 @@ export function createApi(base: string) {
     /** Every mob with the maps it spawns in, ordered by mob id. */
     mobLocations: () => request<MobLocations>("/api/mobs/locations"),
     mobSpriteUrl: (id: number) => `${base}/api/mobs/${id}/sprite`,
+    /** Every map with its mobs and NPCs, ordered by map id. */
+    maps: () => request<Maps>("/api/maps"),
     mapMinimapUrl: (id: number) => `${base}/api/maps/${id}/minimap`,
     /** Every NPC the library's quests start or end at, ordered by NPC id. */
     npcQuests: () => request<NpcQuests[]>("/api/npcs/quests"),

@@ -51,7 +51,8 @@ public sealed partial class WzService
                                 foreach (var map in mob.WzProperties.Select(m => Int(m)).OfType<int>()) Add(id, map);
             // Etc's list can be stale (an install that renumbered its mobs and maps keeps the old one), so the maps' own
             // spawn points are added too.
-            foreach (var (map, mob) in MapSpawns(source)) Add(mob, map);
+            foreach (var (map, life) in MapLives())
+                foreach (var mob in life.Mobs.Keys) Add(mob, map);
 
             _mobImages ??= IndexMobImages();
             using var names = new NameIndex(source, InRoot);
@@ -62,26 +63,6 @@ public sealed partial class WzService
                 .ToList();
             return _mobLocations = new MobLocationsDto(mobs, mapNames);
         }
-    }
-
-    /// <summary>Every mob placed in a map's life (type "m"), from the Map files next to <paramref name="archive"/>.</summary>
-    private List<(int Map, int Mob)> MapSpawns(string archive)
-    {
-        var spawns = new List<(int, int)>();
-        for (var region = 0; region < 10; region++)
-            InSibling(archive, "Map", $"Map/Map{region}", (e, dir) =>
-            {
-                foreach (var img in dir.WzImages)
-                {
-                    if (!img.Name.EndsWith(".img") || !int.TryParse(img.Name[..^4], out var map)) continue;
-                    var wasParsed = img.Parsed;
-                    foreach (var life in img["life"]?.WzProperties ?? Enumerable.Empty<WzImageProperty>())
-                        if (Text(life["type"]) == "m" && Int(life["id"]) is { } mob) spawns.Add((map, mob));
-                    if (!wasParsed) img.UnparseImage(); // don't keep every map in memory just for this
-                }
-                return null; // keep going through the other parts
-            });
-        return spawns;
     }
 
     /// <summary>The mob's standing sprite (or the first picture it has), following info/link to the mob it borrows from.</summary>
@@ -104,9 +85,9 @@ public sealed partial class WzService
         }
     }
 
-    /// <summary>The map's minimap, from the Map files next to Etc.</summary>
+    /// <summary>The map's minimap, from the Map files next to Etc (or the library's other files).</summary>
     public byte[]? MapMinimap(int id) =>
-        MobLocationsSource() is { } source ? Preview(LocateNear(source, "map", id), "map") : null;
+        MapAnchor() is { } anchor ? Preview(LocateNear(anchor, "map", id), "map") : null;
 
     private string? MobLocationsSource()
     {

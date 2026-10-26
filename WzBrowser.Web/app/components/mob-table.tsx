@@ -1,14 +1,13 @@
-import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Mob } from "../lib/api";
 import { useConnection } from "../lib/connection";
+import { useScrollIntoView, type Focus } from "../lib/focus";
+import { mobId } from "../lib/game-ids";
 import { Search, XMark } from "./icons";
 import { inputClass } from "./ui";
 
 /** Rows rendered at a time; "Show more" adds another page. */
 const PAGE = 150;
-
-/** Ids as the game writes them: mobs in seven digits. */
-const mobId = (id: number) => String(id).padStart(7, "0");
 
 const ELEMENT: Record<string, string> = { F: "Fire", I: "Ice", L: "Lightning", S: "Poison", H: "Holy", D: "Dark", P: "Physical" };
 const AFFINITY: Record<string, { label: string; className: string }> = {
@@ -64,7 +63,10 @@ const COLUMNS: readonly Column[] = [
 type Sort = { key: string; desc: boolean } | null;
 
 /** Every mob in the library with its stats, one row each, sortable by any column. */
-export const MobTable = memo(function MobTable() {
+export const MobTable = memo(function MobTable({ focus }: {
+  /** The mob another tab asked to show: it's scrolled to and highlighted. */
+  focus: Focus | null;
+}) {
   const { api, status } = useConnection();
   const [mobs, setMobs] = useState<Mob[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +74,9 @@ export const MobTable = memo(function MobTable() {
   const [bossesOnly, setBossesOnly] = useState(false);
   const [sort, setSort] = useState<Sort>(null);
   const [limit, setLimit] = useState(PAGE);
+  const [focused, setFocused] = useState<number | null>(null);
+  const applied = useRef<Focus | null>(null);
+  const scrollTo = useScrollIntoView();
 
   useEffect(() => {
     if (status !== "online" || mobs) return;
@@ -102,14 +107,32 @@ export const MobTable = memo(function MobTable() {
   );
 
   // A new search or order starts back at the first page.
-  useEffect(() => setLimit(PAGE), [needle, bossesOnly, sort]);
+  const search = (value: string) => { setFilter(value); setLimit(PAGE); };
+  const showBosses = (on: boolean) => { setBossesOnly(on); setLimit(PAGE); };
 
   // Numbers start from the biggest, names from A; a third click goes back to id order.
-  const toggleSort = (c: Column) => setSort((s) => {
-    const first = !!c.numeric;
-    if (s?.key !== c.key) return { key: c.key, desc: first };
-    return s.desc === first ? { key: c.key, desc: !first } : null;
-  });
+  const toggleSort = (c: Column) => {
+    setSort((s) => {
+      const first = !!c.numeric;
+      if (s?.key !== c.key) return { key: c.key, desc: first };
+      return s.desc === first ? { key: c.key, desc: !first } : null;
+    });
+    setLimit(PAGE);
+  };
+
+  // Another tab's link: clear the search (and "Bosses only" unless it's a boss), keep the order, and scroll to the mob.
+  useEffect(() => {
+    if (!focus || !mobs || applied.current === focus) return;
+    applied.current = focus;
+    const mob = mobs.find((m) => m.id === focus.id);
+    if (!mob) return;
+    const bosses = bossesOnly && mob.boss;
+    setBossesOnly(bosses);
+    setFilter("");
+    setLimit(Math.max(PAGE, sorted.filter((m) => !bosses || m.boss).indexOf(mob) + 1));
+    setFocused(mob.id);
+    scrollTo(`mob-${mob.id}`);
+  }, [focus, mobs, sorted, bossesOnly, scrollTo]);
 
   const headCell = "sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50/95 p-0 text-xs font-semibold text-zinc-600 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95 dark:text-zinc-300";
 
@@ -121,8 +144,8 @@ export const MobTable = memo(function MobTable() {
             <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
             <input
               value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Escape") setFilter(""); }}
+              onChange={(e) => search(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Escape") search(""); }}
               placeholder="Search by mob name or id…"
               aria-label="Search mobs"
               className={`${inputClass} !rounded-lg !py-2 pl-10 ${filter ? "pr-10" : ""}`}
@@ -130,7 +153,7 @@ export const MobTable = memo(function MobTable() {
             {filter && (
               <button
                 type="button"
-                onClick={(e) => { setFilter(""); (e.currentTarget.previousElementSibling as HTMLElement | null)?.focus(); }}
+                onClick={(e) => { search(""); (e.currentTarget.previousElementSibling as HTMLElement | null)?.focus(); }}
                 aria-label="Clear search"
                 title="Clear search (Esc)"
                 className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
@@ -140,7 +163,7 @@ export const MobTable = memo(function MobTable() {
             )}
           </label>
           <label className="flex shrink-0 cursor-pointer select-none items-center gap-2 text-[13px] text-zinc-600 dark:text-zinc-400">
-            <input type="checkbox" checked={bossesOnly} onChange={(e) => setBossesOnly(e.target.checked)} className="size-4 accent-accent-600" />
+            <input type="checkbox" checked={bossesOnly} onChange={(e) => showBosses(e.target.checked)} className="size-4 accent-accent-600" />
             Bosses only
           </label>
         </div>
@@ -179,7 +202,7 @@ export const MobTable = memo(function MobTable() {
             </thead>
             <tbody>
               {rows.slice(0, limit).map((m) => (
-                <tr key={m.id} className="transition-colors hover:bg-zinc-50/80 dark:hover:bg-zinc-800/40">
+                <tr key={m.id} id={`mob-${m.id}`} className={`scroll-mt-11 transition-colors ${focused === m.id ? "bg-accent-50/40 dark:bg-accent-600/5" : "hover:bg-zinc-50/80 dark:hover:bg-zinc-800/40"}`}>
                   <td className="border-b border-zinc-100 py-1 pl-4 pr-1 sm:pl-6 dark:border-zinc-800/70">
                     <span className="grid size-12 place-items-center overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800">
                       <img src={api.mobSpriteUrl(m.id)} alt="" loading="lazy" className="max-h-12 max-w-12 object-contain [image-rendering:pixelated]"

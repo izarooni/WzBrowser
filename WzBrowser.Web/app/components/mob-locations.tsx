@@ -1,6 +1,8 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { MobLocation, MobLocations } from "../lib/api";
 import { useConnection } from "../lib/connection";
+import { useScrollIntoView, type Focus } from "../lib/focus";
+import { mapId, mobId, splitMapName } from "../lib/game-ids";
 import { ChevronDown, ChevronRight, Search, XMark } from "./icons";
 import { inputClass } from "./ui";
 
@@ -9,19 +11,13 @@ const PAGE = 150;
 /** Map names shown on a collapsed row before "+N more". */
 const PREVIEW_MAPS = 6;
 
-/** Ids as the game writes them: mobs in seven digits, maps in nine. */
-const mobId = (id: number) => String(id).padStart(7, "0");
-const mapId = (id: number) => String(id).padStart(9, "0");
-
-/** "Street : Map" -> its two halves; a name without a street is all map. */
-function splitMapName(name: string | undefined): { street: string | null; map: string | null } {
-  if (!name) return { street: null, map: null };
-  const at = name.indexOf(" : ");
-  return at < 0 ? { street: null, map: name } : { street: name.slice(0, at), map: name.slice(at + 3) };
-}
-
 /** Every mob with the maps it spawns in: its sprite, and each map's name and minimap. */
-export const MobLocationTable = memo(function MobLocationTable() {
+export const MobLocationTable = memo(function MobLocationTable({ focus, onShowMap }: {
+  /** The mob another tab asked to show: it's opened and scrolled to. */
+  focus: Focus | null;
+  /** Shows the map in the Maps tab; without it the maps aren't links. */
+  onShowMap?: (id: number) => void;
+}) {
   const { api, status } = useConnection();
   const [data, setData] = useState<MobLocations | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -29,6 +25,9 @@ export const MobLocationTable = memo(function MobLocationTable() {
   const [showUnknown, setShowUnknown] = useState(false);
   const [open, setOpen] = useState<Set<number>>(new Set());
   const [limit, setLimit] = useState(PAGE);
+  const [focused, setFocused] = useState<number | null>(null);
+  const applied = useRef<Focus | null>(null);
+  const scrollTo = useScrollIntoView();
 
   useEffect(() => {
     if (status !== "online" || data) return;
@@ -61,7 +60,22 @@ export const MobLocationTable = memo(function MobLocationTable() {
   }, [pool, needle, data]);
 
   // A new search starts back at the first page.
-  useEffect(() => setLimit(PAGE), [needle, showUnknown]);
+  const search = (value: string) => { setFilter(value); setLimit(PAGE); };
+
+  // Another tab's link: clear the search, open the mob (showing mobs this install lacks if it's one), and scroll to it.
+  useEffect(() => {
+    if (!focus || !data || applied.current === focus) return;
+    applied.current = focus;
+    const mob = data.mobs.find((m) => m.id === focus.id);
+    if (!mob) return;
+    const unknown = showUnknown || !mob.known;
+    setShowUnknown(unknown);
+    setFilter("");
+    setOpen((o) => new Set(o).add(mob.id));
+    setLimit(Math.max(PAGE, data.mobs.filter((m) => unknown || m.known).indexOf(mob) + 1));
+    setFocused(mob.id);
+    scrollTo(`mob-location-${mob.id}`);
+  }, [focus, data, showUnknown, scrollTo]);
 
   const toggle = (id: number) => setOpen((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
@@ -73,8 +87,8 @@ export const MobLocationTable = memo(function MobLocationTable() {
             <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
             <input
               value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Escape") setFilter(""); }}
+              onChange={(e) => search(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Escape") search(""); }}
               placeholder="Search by mob or map name, or id…"
               aria-label="Search mobs and maps"
               className={`${inputClass} !rounded-lg !py-2 pl-10 ${filter ? "pr-10" : ""}`}
@@ -82,7 +96,7 @@ export const MobLocationTable = memo(function MobLocationTable() {
             {filter && (
               <button
                 type="button"
-                onClick={(e) => { setFilter(""); (e.currentTarget.previousElementSibling as HTMLElement | null)?.focus(); }}
+                onClick={(e) => { search(""); (e.currentTarget.previousElementSibling as HTMLElement | null)?.focus(); }}
                 aria-label="Clear search"
                 title="Clear search (Esc)"
                 className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
@@ -96,7 +110,7 @@ export const MobLocationTable = memo(function MobLocationTable() {
               className="flex shrink-0 cursor-pointer select-none items-center gap-2 text-[13px] text-zinc-600 dark:text-zinc-400"
               title="Etc can list mobs this install's Mob data doesn't have; they have no sprite"
             >
-              <input type="checkbox" checked={showUnknown} onChange={(e) => setShowUnknown(e.target.checked)} className="size-4 accent-accent-600" />
+              <input type="checkbox" checked={showUnknown} onChange={(e) => { setShowUnknown(e.target.checked); setLimit(PAGE); }} className="size-4 accent-accent-600" />
               Show mobs missing from this install
             </label>
           )}
@@ -119,7 +133,7 @@ export const MobLocationTable = memo(function MobLocationTable() {
             // Maps the search named come first.
             const maps = hits ? [...mob.maps.filter((m) => hits.has(m)), ...mob.maps.filter((m) => !hits.has(m))] : mob.maps;
             return (
-              <li key={mob.id}>
+              <li key={mob.id} id={`mob-location-${mob.id}`} className={`scroll-mt-2 ${focused === mob.id ? "bg-accent-50/40 dark:bg-accent-600/5" : ""}`}>
                 <button
                   type="button"
                   onClick={() => toggle(mob.id)}
@@ -163,7 +177,7 @@ export const MobLocationTable = memo(function MobLocationTable() {
                 </button>
                 {expanded && (
                   <ul className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-3 px-4 pb-4 sm:pl-[6.5rem] sm:pr-6">
-                    {maps.map((m) => <MapCard key={m} id={m} name={mapName(m)} highlight={hits?.has(m) ?? false} />)}
+                    {maps.map((m) => <MapCard key={m} id={m} name={mapName(m)} highlight={hits?.has(m) ?? false} onShow={onShowMap} />)}
                   </ul>
                 )}
               </li>
@@ -186,12 +200,13 @@ export const MobLocationTable = memo(function MobLocationTable() {
   );
 });
 
-function MapCard({ id, name, highlight }: { id: number; name: string | undefined; highlight: boolean }) {
+/** A map with its minimap and name; a link to the map's page in the Maps tab when `onShow` is given. */
+export function MapCard({ id, name, highlight, onShow }: { id: number; name: string | undefined; highlight: boolean; onShow?: (id: number) => void }) {
   const { api } = useConnection();
   const [hasMinimap, setHasMinimap] = useState(true);
   const { street, map } = splitMapName(name);
-  return (
-    <li className={`overflow-hidden rounded-xl border bg-white dark:bg-zinc-900 ${highlight ? "border-accent-400 dark:border-accent-500/60" : "border-zinc-200 dark:border-zinc-800"}`}>
+  const body = (
+    <>
       <div className="grid h-28 place-items-center bg-zinc-50 dark:bg-zinc-950/40">
         {hasMinimap
           ? <img src={api.mapMinimapUrl(id)} alt="" loading="lazy" className="max-h-28 max-w-full object-contain" onError={() => setHasMinimap(false)} />
@@ -204,6 +219,13 @@ function MapCard({ id, name, highlight }: { id: number; name: string | undefined
           <span className="ml-auto shrink-0 font-mono tabular-nums">{mapId(id)}</span>
         </p>
       </div>
+    </>
+  );
+  return (
+    <li className={`overflow-hidden rounded-xl border bg-white transition dark:bg-zinc-900 ${highlight ? "border-accent-400 dark:border-accent-500/60" : "border-zinc-200 dark:border-zinc-800"} ${onShow ? "hover:border-accent-400 dark:hover:border-accent-500/60" : ""}`}>
+      {onShow
+        ? <button type="button" onClick={() => onShow(id)} title="Show this map's mobs and NPCs" className="block w-full text-left">{body}</button>
+        : body}
     </li>
   );
 }

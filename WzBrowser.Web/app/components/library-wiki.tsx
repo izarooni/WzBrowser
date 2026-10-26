@@ -2,8 +2,10 @@ import { useSearchParams } from "@remix-run/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { LibraryFile, OpenedFile } from "../lib/api";
 import { useConnection } from "../lib/connection";
+import type { Focus } from "../lib/focus";
 import { CommodityEditor } from "./commodity-editor";
 import { libraryLabels } from "./file-picker";
+import { MapTable } from "./map-table";
 import { MobLocationTable } from "./mob-locations";
 import { MobTable } from "./mob-table";
 import { NpcQuestTable } from "./npc-quests";
@@ -19,8 +21,18 @@ const KIND_ABOUT: Record<NonNullable<LibraryFile["kind"]>, string> = {
 /** Shows a quest in its archive's tab (`archive` is the archive's library name). */
 type OpenQuest = (archive: string, quest: number) => void;
 
+/** What a data tab can link to. The `show*` links are left out when the library has no such tab. */
+interface Links {
+  openQuest: OpenQuest;
+  /** The row another tab asked this one to show, while this is the open tab. */
+  focus: Focus | null;
+  showMap?: (id: number) => void;
+  showMob?: (id: number) => void;
+  showNpc?: (id: number) => void;
+}
+
 /** Tabs that aren't a file: they read data from across the library. Each is shown when the server says it has it. */
-const DATA_TABS: readonly { key: string; title: string; has: "skills" | "mobs" | "mobLocations" | "npcs"; about: string; view: (openQuest: OpenQuest) => ReactNode }[] = [
+const DATA_TABS: readonly { key: string; title: string; has: "skills" | "mobs" | "mobLocations" | "maps" | "npcs"; about: string; view: (links: Links) => ReactNode }[] = [
   {
     // Skill.wz or a Packs/Skill_*.ms pack
     key: "skills", title: "Skills", has: "skills",
@@ -31,19 +43,25 @@ const DATA_TABS: readonly { key: string; title: string; has: "skills" | "mobs" |
     // Mob.wz (or its parts, or a Packs/Mob_*.ms pack), with String's names
     key: "mobs", title: "Mobs", has: "mobs",
     about: "Every mob with its level, HP, EXP and combat stats. Click a column to sort by it; search by name or id.",
-    view: () => <MobTable />,
+    view: ({ focus }) => <MobTable focus={focus} />,
   },
   {
     // Etc's MobLocation.img, plus the spawn points in the maps themselves
     key: "mob-locations", title: "Mob Locations", has: "mobLocations",
-    about: "Where every mob spawns, from Etc's MobLocation.img and the maps' own spawn points. Search by mob or map; open a mob to see each map's minimap.",
-    view: () => <MobLocationTable />,
+    about: "Where every mob spawns, from Etc's MobLocation.img and the maps' own spawn points. Search by mob or map; open a mob to see each map's minimap, and pick one to see what else is there.",
+    view: ({ focus, showMap }) => <MobLocationTable focus={focus} onShowMap={showMap} />,
+  },
+  {
+    // Every map's life in the Map files, plus the mobs Etc's MobLocation.img lists there
+    key: "maps", title: "Maps", has: "maps",
+    about: "Every map with the mobs that spawn in it and the NPCs standing in it. Search by map, mob or NPC; open a map to see its minimap, and pick a mob to see its stats or an NPC to see its quests and maps.",
+    view: ({ focus, showMob, showNpc }) => <MapTable focus={focus} onShowMob={showMob} onShowNpc={showNpc} />,
   },
   {
     // Check/0/npc and Check/1/npc of every quest archive
     key: "npcs", title: "NPCs", has: "npcs",
-    about: "Every NPC that starts or ends a quest. Search by NPC or quest; open an NPC to see its quests, and pick one to read it.",
-    view: (openQuest) => <NpcQuestTable onOpenQuest={openQuest} />,
+    about: "Every NPC that starts or ends a quest. Search by NPC or quest; open an NPC to see its quests and the maps it stands in, and pick one to go there.",
+    view: ({ openQuest, focus, showMap }) => <NpcQuestTable onOpenQuest={openQuest} focus={focus} onShowMap={showMap} />,
   },
 ];
 
@@ -51,8 +69,8 @@ type Loaded = { file: OpenedFile } | { error: string };
 
 /**
  * The browse-only layout: a pinned server's browsable files as one full page, like a wiki article with a tab per
- * file, instead of a window per file, plus tabs for skills, mobs, mob locations and NPCs when the library has that data. The open tab is kept in
- * the address (`?tab=`) so it can be linked to.
+ * file, instead of a window per file, plus tabs for skills, mobs, mob locations, maps and NPCs when the library has that data. The open tab is
+ * kept in the address (`?tab=`), with the row a link showed in it (`&id=`), so it can be linked to.
  */
 export function LibraryWiki() {
   const connection = useConnection();
@@ -63,6 +81,11 @@ export function LibraryWiki() {
   const [params, setParams] = useSearchParams();
   // A quest picked elsewhere (the NPC tab) for its archive's tab to show; a new object each time, so picking it again jumps again.
   const [questFocus, setQuestFocus] = useState<{ archive: string; quest: number } | null>(null);
+  // A row picked in one data tab for another to show (a map, a mob, an NPC); a link to `?tab=…&id=…` starts there.
+  const [rowFocus, setRowFocus] = useState<{ tab: string; focus: Focus } | null>(() => {
+    const tab = params.get("tab"), id = Number(params.get("id"));
+    return tab && params.get("id") && Number.isInteger(id) ? { tab, focus: { id } } : null;
+  });
 
   useEffect(() => {
     if (status !== "online") return;
@@ -113,8 +136,24 @@ export function LibraryWiki() {
   if (error) return <Notice title="The library couldn't be listed">{error}</Notice>;
   if (library && library.length === 0 && dataTabs.length === 0) return <Notice title="Nothing to browse yet">The library folder has no quest archives or Etc.wz.</Notice>;
 
-  const select = (tab: string) => setParams((p) => { const n = new URLSearchParams(p); n.set("tab", tab); return n; }, { preventScrollReset: true });
+  const go = (tab: string, id?: number) => setParams((p) => {
+    const n = new URLSearchParams(p);
+    n.set("tab", tab);
+    if (id === undefined) n.delete("id"); else n.set("id", String(id));
+    return n;
+  }, { preventScrollReset: true });
+  const select = (tab: string) => { go(tab); setRowFocus(null); };
   const openQuest: OpenQuest = (archive, quest) => { select(archive); setQuestFocus({ archive, quest }); };
+  const show = (tab: string) => dataTabs.some((t) => t.key === tab)
+    ? (id: number) => { go(tab, id); setRowFocus({ tab, focus: { id } }); }
+    : undefined;
+  const links = (tab: string): Links => ({
+    openQuest,
+    focus: rowFocus?.tab === tab && tab === dataActive?.key ? rowFocus.focus : null,
+    showMap: show("maps"),
+    showMob: show("mobs"),
+    showNpc: show("npcs"),
+  });
   const tabClass = (on: boolean) => `shrink-0 rounded-t-xl border px-5 py-2.5 text-sm font-medium transition ${
     on
       ? "border-zinc-200 border-b-white bg-white text-zinc-900 dark:border-zinc-800 dark:border-b-zinc-900 dark:bg-zinc-900 dark:text-zinc-100"
@@ -168,7 +207,7 @@ export function LibraryWiki() {
           )}
           {dataTabs.filter((t) => t === dataActive || dataSeen.has(t.key)).map((t) => (
             <div key={t.key} role="tabpanel" className={t === dataActive ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-              {t.view(openQuest)}
+              {t.view(links(t.key))}
             </div>
           ))}
 

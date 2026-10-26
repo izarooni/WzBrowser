@@ -117,7 +117,7 @@ var api = app.MapGroup("/api");
 // and keeps its API address fixed. `readOnly`: this caller is on another computer (or behind a proxy) and may only view.
 // `browseOnly`: both, so only quest archives and Etc.wz are offered, and only through their own views.
 api.MapGet("/health", (WzService wz, HttpContext ctx) =>
-    new { status = "ok", port, version = "1.0.0", library = wz.Root != null, readOnly = IsRemote(ctx), browseOnly = BrowseOnly(ctx), skills = wz.HasSkills, mobs = wz.HasMobs, mobLocations = wz.HasMobLocations, npcs = wz.HasNpcQuests });
+    new { status = "ok", port, version = "1.0.0", library = wz.Root != null, readOnly = IsRemote(ctx), browseOnly = BrowseOnly(ctx), skills = wz.HasSkills, mobs = wz.HasMobs, mobLocations = wz.HasMobLocations, maps = wz.HasMaps, npcs = wz.HasNpcQuests });
 
 // ---- the files a pinned server offers ----
 api.MapGet("/library", (WzService wz, HttpContext ctx) => wz.Library(browsableOnly: BrowseOnly(ctx)));
@@ -130,6 +130,8 @@ api.MapGet("/mobs", (WzService wz) => wz.Mobs());
 // Etc's MobLocation.img: each mob and the maps it spawns in, with names, the mob's sprite and the maps' minimaps.
 api.MapGet("/mobs/locations", (WzService wz) => wz.MobLocations());
 api.MapGet("/mobs/{id:int}/sprite", (int id, HttpContext ctx, WzService wz) => LibraryPng(wz.MobSprite(id), ctx));
+// Every map with the mobs and NPCs its life places (and the mobs Etc lists there), with names.
+api.MapGet("/maps", (WzService wz) => wz.Maps());
 api.MapGet("/maps/{id:int}/minimap", (int id, HttpContext ctx, WzService wz) => LibraryPng(wz.MapMinimap(id), ctx));
 // The NPCs the library's quests start and end at, with the quests, and each NPC's sprite.
 api.MapGet("/npcs/quests", (WzService wz) => wz.NpcQuests());
