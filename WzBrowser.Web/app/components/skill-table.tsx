@@ -25,8 +25,8 @@ function jobName(book: SkillBook): string {
   return JOB_NAMES[book.job] ?? (book.job === 800 || book.job === 900 ? "GM" : book.book ?? `Job ${book.job}`);
 }
 
-/** Skill strings: line breaks (written as "\n" in the data) and #c...# for the client's orange highlight. */
-function SkillText({ text }: { text: string }) {
+/** Skill and item strings: line breaks (written as "\n" in the data) and #c...# for the client's orange highlight. */
+export function SkillText({ text }: { text: string }) {
   const parts = useMemo(() => {
     const out: ReactNode[] = [];
     text.replace(/\\r\\n|\\n/g, "\n").split(/(#c[^#]*#)/).forEach((chunk, i) => {

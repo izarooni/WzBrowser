@@ -5,6 +5,7 @@ import { useConnection } from "../lib/connection";
 import type { Focus } from "../lib/focus";
 import { CommodityEditor } from "./commodity-editor";
 import { libraryLabels } from "./file-picker";
+import { ItemTable } from "./item-table";
 import { MapTable } from "./map-table";
 import { MobLocationTable } from "./mob-locations";
 import { MobTable } from "./mob-table";
@@ -32,7 +33,7 @@ interface Links {
 }
 
 /** Tabs that aren't a file: they read data from across the library. Each is shown when the server says it has it. */
-const DATA_TABS: readonly { key: string; title: string; has: "skills" | "mobs" | "mobLocations" | "maps" | "npcs"; about: string; view: (links: Links) => ReactNode }[] = [
+const DATA_TABS: readonly { key: string; title: string; has: "skills" | "mobs" | "mobLocations" | "maps" | "items" | "npcs"; about: string; view: (links: Links) => ReactNode }[] = [
   {
     // Skill.wz or a Packs/Skill_*.ms pack
     key: "skills", title: "Skills", has: "skills",
@@ -58,6 +59,12 @@ const DATA_TABS: readonly { key: string; title: string; has: "skills" | "mobs" |
     view: ({ focus, showMob, showNpc }) => <MapTable focus={focus} onShowMob={showMob} onShowNpc={showNpc} />,
   },
   {
+    // Character's equipment folders and Item's Consume, Install, Etc, Cash and Pet, with String's names
+    key: "items", title: "Items", has: "items",
+    about: "Every item by inventory tab with its stats, description and shop price. Sort by price, level or name; search by name, id or description.",
+    view: () => <ItemTable />,
+  },
+  {
     // Check/0/npc and Check/1/npc of every quest archive
     key: "npcs", title: "NPCs", has: "npcs",
     about: "Every NPC that starts or ends a quest. Search by NPC or quest; open an NPC to see its quests and the maps it stands in, and pick one to go there.",
@@ -69,7 +76,7 @@ type Loaded = { file: OpenedFile } | { error: string };
 
 /**
  * The browse-only layout: a pinned server's browsable files as one full page, like a wiki article with a tab per
- * file, instead of a window per file, plus tabs for skills, mobs, mob locations, maps and NPCs when the library has that data. The open tab is
+ * file, instead of a window per file, plus tabs for skills, mobs, mob locations, maps, items and NPCs when the library has that data. The open tab is
  * kept in the address (`?tab=`), with the row a link showed in it (`&id=`), so it can be linked to.
  */
 export function LibraryWiki() {

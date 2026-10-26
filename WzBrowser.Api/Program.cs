@@ -117,7 +117,7 @@ var api = app.MapGroup("/api");
 // and keeps its API address fixed. `readOnly`: this caller is on another computer (or behind a proxy) and may only view.
 // `browseOnly`: both, so only quest archives and Etc.wz are offered, and only through their own views.
 api.MapGet("/health", (WzService wz, HttpContext ctx) =>
-    new { status = "ok", port, version = "1.0.0", library = wz.Root != null, readOnly = IsRemote(ctx), browseOnly = BrowseOnly(ctx), skills = wz.HasSkills, mobs = wz.HasMobs, mobLocations = wz.HasMobLocations, maps = wz.HasMaps, npcs = wz.HasNpcQuests });
+    new { status = "ok", port, version = "1.0.0", library = wz.Root != null, readOnly = IsRemote(ctx), browseOnly = BrowseOnly(ctx), skills = wz.HasSkills, mobs = wz.HasMobs, mobLocations = wz.HasMobLocations, maps = wz.HasMaps, items = wz.HasItems, npcs = wz.HasNpcQuests });
 
 // ---- the files a pinned server offers ----
 api.MapGet("/library", (WzService wz, HttpContext ctx) => wz.Library(browsableOnly: BrowseOnly(ctx)));
@@ -133,6 +133,9 @@ api.MapGet("/mobs/{id:int}/sprite", (int id, HttpContext ctx, WzService wz) => L
 // Every map with the mobs and NPCs its life places (and the mobs Etc lists there), with names.
 api.MapGet("/maps", (WzService wz) => wz.Maps());
 api.MapGet("/maps/{id:int}/minimap", (int id, HttpContext ctx, WzService wz) => LibraryPng(wz.MapMinimap(id), ctx));
+// Every item in one inventory tab (equip, use, setup, etc, cash) with its stats, String's name and description, and its icon.
+api.MapGet("/items/{category}", (string category, WzService wz) => wz.Items(category));
+api.MapGet("/items/{id:int}/icon", (int id, HttpContext ctx, WzService wz) => LibraryPng(wz.ItemIcon(id), ctx));
 // The NPCs the library's quests start and end at, with the quests, and each NPC's sprite.
 api.MapGet("/npcs/quests", (WzService wz) => wz.NpcQuests());
 api.MapGet("/npcs/{id:int}/sprite", (int id, HttpContext ctx, WzService wz) => LibraryPng(wz.NpcSprite(id), ctx));

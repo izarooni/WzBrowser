@@ -27,6 +27,8 @@ interface Connection {
   mobLocations: boolean;
   /** The library has Map files, so its maps' mobs and NPCs can be listed (a pinned server only). */
   maps: boolean;
+  /** The library has Item or Character files, so its items can be listed (a pinned server only). */
+  items: boolean;
   /** The library has a quest archive, so its NPCs' quests can be listed (a pinned server only). */
   npcs: boolean;
   setBase: (base: string) => void;
@@ -47,6 +49,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   const [mobs, setMobs] = useState(false);
   const [mobLocations, setMobLocations] = useState(false);
   const [maps, setMaps] = useState(false);
+  const [items, setItems] = useState(false);
   const [npcs, setNpcs] = useState(false);
   const [defaultBase, setDefaultBase] = useState(DEFAULT_API_BASE);
   const [ready, setReady] = useState(false);
@@ -83,6 +86,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
         setMobs(!!h.mobs);
         setMobLocations(!!h.mobLocations);
         setMaps(!!h.maps);
+        setItems(!!h.items);
         setNpcs(!!h.npcs);
       } catch {
         if (cancelled) return;
@@ -106,8 +110,8 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   const recheck = useCallback(() => setTick((t) => t + 1), []);
 
   const value = useMemo(
-    () => ({ api, base, defaultBase, status, apiVersion, library, readOnly, browseOnly, skills, mobs, mobLocations, maps, npcs, setBase, recheck }),
-    [api, base, defaultBase, status, apiVersion, library, readOnly, browseOnly, skills, mobs, mobLocations, maps, npcs, setBase, recheck],
+    () => ({ api, base, defaultBase, status, apiVersion, library, readOnly, browseOnly, skills, mobs, mobLocations, maps, items, npcs, setBase, recheck }),
+    [api, base, defaultBase, status, apiVersion, library, readOnly, browseOnly, skills, mobs, mobLocations, maps, items, npcs, setBase, recheck],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
