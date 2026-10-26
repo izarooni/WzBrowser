@@ -41,11 +41,13 @@ function remap(row: CommodityRow, from: CommodityColumn[], to: CommodityColumn[]
 const colWidth = (c: CommodityColumn) => (c.type === "string" ? 200 : c.name.toLowerCase() === "sn" ? 120 : 104);
 
 /** Commodity.img (Etc.wz) as a table: one row per Cash Shop entry, every value editable in place, plus adding entries. */
-export const CommodityEditor = memo(function CommodityEditor({ fileId, revision, onOpenRaw }: {
+export const CommodityEditor = memo(function CommodityEditor({ fileId, revision, onOpenRaw, readOnly = false }: {
   fileId: string;
   revision: number;
-  /** Switches to the raw tree and reveals this node, e.g. "Commodity.img/12". */
-  onOpenRaw: (path: string) => void;
+  /** Show the entries only: no selecting, adding, deleting or editing values. */
+  readOnly?: boolean;
+  /** Switches to the raw tree and reveals this node, e.g. "Commodity.img/12". Left out when there's no raw tree. */
+  onOpenRaw?: (path: string) => void;
 }) {
   const { api, status } = useConnection();
   const actions = useActions();
@@ -315,7 +317,7 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
   // ------------------------------------------------------------ layout
 
   const ref = useMemo<RefContext>(() => ({ fileId, openQuest: () => {} }), [fileId]);
-  const template = ["40px", "88px", ...(itemCol >= 0 ? ["240px"] : []), ...columns.map((c) => `${colWidth(c)}px`), "84px"].join(" ");
+  const template = [...(readOnly ? [] : ["40px"]), "88px", ...(itemCol >= 0 ? ["240px"] : []), ...columns.map((c) => `${colWidth(c)}px`), ...(readOnly ? [] : ["84px"])].join(" ");
   const headCell = "flex items-center gap-1.5 px-3 text-left text-xs font-semibold text-zinc-600 dark:text-zinc-300";
   const sortMark = (col: number) => (sort?.col === col ? (sort.desc ? " ↓" : " ↑") : "");
 
@@ -348,6 +350,7 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
           <p className="shrink-0 text-xs text-zinc-500">
             {table ? (needle ? `${visible.length.toLocaleString()} of ${table.rows.length.toLocaleString()} entries` : `${table.rows.length.toLocaleString()} entries`) : error ? "" : "Loading…"}
           </p>
+          {!readOnly && <>
           <button type="button" onClick={() => void deleteSelected()} disabled={selected.size === 0}
             title={selected.size ? "Delete the selected entries" : "Tick rows in the first column to select them"}
             className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-white px-3.5 py-2 text-[13px] font-semibold text-rose-700 shadow-sm transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:text-zinc-400 disabled:hover:bg-white dark:border-rose-900 dark:bg-zinc-900 dark:text-rose-300 dark:hover:bg-rose-950/40 dark:disabled:border-zinc-800 dark:disabled:text-zinc-600 dark:disabled:hover:bg-zinc-900">
@@ -356,6 +359,7 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
           <button type="button" onClick={() => setAdding((a) => !a)} aria-expanded={adding} className={`${buttonPrimary} !rounded-lg !px-3.5 !py-2 !text-[13px]`}>
             <Plus className="size-4" />Add entry
           </button>
+          </>}
         </div>
 
         {adding && (
@@ -399,14 +403,14 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
             <div role="table" aria-label={IMG} aria-rowcount={visible.length + 1} className="w-max min-w-full text-[13px]">
               <div role="row" style={{ gridTemplateColumns: template, height: ROW_H }}
                 className="sticky top-0 z-10 grid border-b border-zinc-200 bg-zinc-50/95 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95">
-                <div role="columnheader" className="grid place-items-center">
+                {!readOnly && <div role="columnheader" className="grid place-items-center">
                   {/* Selects (or clears) the rows the search shows. */}
                   <input type="checkbox" aria-label="Select all shown entries" title="Select all shown entries"
                     checked={visible.length > 0 && visibleSelected === visible.length}
                     ref={(el) => { if (el) el.indeterminate = visibleSelected > 0 && visibleSelected < visible.length; }}
                     onChange={() => select(visible, visibleSelected < visible.length)}
                     className="size-4 cursor-pointer accent-accent-600" />
-                </div>
+                </div>}
                 <button type="button" role="columnheader" onClick={() => toggleSort(-1)} className={headCell}>Entry{sortMark(-1)}</button>
                 {itemCol >= 0 && <div role="columnheader" className={headCell}>Item</div>}
                 {columns.map((c, i) => (
@@ -416,7 +420,7 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
                     <span className="shrink-0 rounded bg-zinc-200/70 px-1 font-mono text-[10px] font-normal text-zinc-500 dark:bg-zinc-800">{c.type}</span>
                   </button>
                 ))}
-                <div role="columnheader" className="sr-only">Actions</div>
+                {!readOnly && <div role="columnheader" className="sr-only">Actions</div>}
               </div>
 
               {visible.length === 0 && <p className="px-4 py-10 text-center text-sm text-zinc-500">{needle ? "No entries match." : "Commodity.img is empty."}</p>}
@@ -438,12 +442,12 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
                       }`}
                     >
                       {/* Shift+mousedown would otherwise extend a text selection from the last click to here. */}
-                      <div role="cell" onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }} className="grid select-none place-items-center">
+                      {!readOnly && <div role="cell" onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }} className="grid select-none place-items-center">
                         <input type="checkbox" checked={isSelected} aria-label={`Select entry ${row.name}`}
                           title="Select for deletion. Shift-click two boxes to select every row between."
                           onChange={(e) => toggle(row, SELECT, (e.nativeEvent as MouseEvent).shiftKey === true)}
                           className={`size-4 cursor-pointer accent-accent-600 ${anchorRow === row.name && anchor.current?.col === SELECT ? "rounded-sm outline-2 outline-offset-2 outline-accent-500" : ""}`} />
-                      </div>
+                      </div>}
                       <div role="cell" className="flex items-center px-3 font-mono text-xs tabular-nums text-zinc-500">{row.name}</div>
                       {itemCol >= 0 && (
                         <div role="cell" className="flex min-w-0 items-center gap-1.5 px-2">
@@ -460,6 +464,7 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
                           key={c.name}
                           column={c}
                           cell={row.cells[col]}
+                          readOnly={readOnly}
                           editing={editing?.row === row.name && editing.col === col}
                           pending={pending.has(`${row.name}/${col}`)}
                           anchor={anchorRow === row.name && anchor.current?.col === col}
@@ -471,16 +476,18 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
                           }}
                         />
                       ))}
-                      <div role="cell" className="flex items-center justify-end gap-0.5 px-2 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">
-                        <button type="button" onClick={() => onOpenRaw(`${IMG}/${row.name}`)} title="Show in raw tree" aria-label={`Show entry ${row.name} in raw tree`}
-                          className="rounded-md px-1.5 py-1 text-[11px] font-medium text-zinc-500 hover:bg-zinc-200/70 hover:text-zinc-900 dark:hover:bg-zinc-700/70 dark:hover:text-zinc-100">
-                          Raw
-                        </button>
+                      {!readOnly && <div role="cell" className="flex items-center justify-end gap-0.5 px-2 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">
+                        {onOpenRaw && (
+                          <button type="button" onClick={() => onOpenRaw(`${IMG}/${row.name}`)} title="Show in raw tree" aria-label={`Show entry ${row.name} in raw tree`}
+                            className="rounded-md px-1.5 py-1 text-[11px] font-medium text-zinc-500 hover:bg-zinc-200/70 hover:text-zinc-900 dark:hover:bg-zinc-700/70 dark:hover:text-zinc-100">
+                            Raw
+                          </button>
+                        )}
                         <button type="button" onClick={() => void actions.deleteNode(fileId, `${IMG}/${row.name}`, `entry ${row.name}`)} title="Delete entry" aria-label={`Delete entry ${row.name}`}
                           className="rounded-md p-1.5 text-zinc-500 hover:bg-rose-100 hover:text-rose-700 dark:hover:bg-rose-500/20">
                           <XMark className="size-4" />
                         </button>
-                      </div>
+                      </div>}
                     </div>
                   );
                 })}
@@ -514,9 +521,11 @@ function ItemIcon({ fileId, id }: { fileId: string; id: number }) {
  * integers (Gender, Class), a number field for other numbers and a text field for strings. A missing value is created
  * with the column's type. Other property types (sub, canvas, ...) are shown but not editable here.
  */
-function Cell({ column, cell, editing, pending, anchor, onEdit, onToggle, onDone }: {
+function Cell({ column, cell, readOnly, editing, pending, anchor, onEdit, onToggle, onDone }: {
   column: CommodityColumn;
   cell: CommodityCell | null;
+  /** Show the value only. */
+  readOnly: boolean;
   editing: boolean;
   pending: boolean;
   /** This checkbox starts the current shift-click range. */
@@ -533,6 +542,20 @@ function Cell({ column, cell, editing, pending, anchor, onEdit, onToggle, onDone
   const editable = EDITABLE.has(type);
   const choices = INTEGER.has(type) ? CHOICES[key] : undefined;
   const base = `flex min-w-0 items-center px-3 ${numeric ? "justify-end font-mono text-xs tabular-nums" : ""} ${pending ? "opacity-50" : ""}`;
+
+  if (readOnly) {
+    const label = cell?.value == null ? null : key === "onsale" && INTEGER.has(type) ? (cell.value === "1" ? "Yes" : "No") : choices?.find(([v]) => String(v) === cell.value)?.[1];
+    return (
+      <div role="cell" title={`${column.name} (${type})`} className={base}>
+        {cell == null ? <span className="text-zinc-300 dark:text-zinc-600">—</span> : (
+          <span className="truncate">
+            {cell.value === "" ? <span className="italic text-zinc-400">(empty)</span> : cell.value}
+            {label && <span className="ml-1 font-sans text-zinc-400">{label}</span>}
+          </span>
+        )}
+      </div>
+    );
+  }
 
   if (!editable) {
     return <div role="cell" title={`${type} property — edit it in the raw tree`} className={`${base} italic text-zinc-400`}>{cell?.value ?? type}</div>;

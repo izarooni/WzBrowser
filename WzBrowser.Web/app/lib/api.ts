@@ -51,6 +51,12 @@ export interface QuestDetail {
   paths: { info: string; check: string; say: string; act: string };
 }
 
+/**
+ * The run of quests a quest belongs to, in play order (just the one quest when it isn't part of a chain).
+ * `before`/`after` are where the chain branches off: several ways in or out, or a neighbour shared with other quests.
+ */
+export interface QuestChain { quests: QuestDetail[]; before: QuestSummary[]; after: QuestSummary[] }
+
 export interface CommodityCell { type: NodeType; value: string | null }
 /** One Commodity.img entry. `cells` follow the table's columns; null where the entry lacks that property. */
 export interface CommodityRow { name: string; cells: (CommodityCell | null)[] }
@@ -88,10 +94,39 @@ export interface NodeEditResult { path: string; node: WzNode; file: OpenedFile }
 
 export interface FsEntry { name: string; path: string; isDirectory: boolean; size: number | null }
 export interface FsListing { path: string; parent: string | null; entries: FsEntry[] }
-/** A file a pinned server offers; `name` is its path relative to the library folder. */
-export interface LibraryFile { name: string; path: string; size: number }
+/** A file a pinned server offers; `name` is its path relative to the library folder. `kind` is set in browse-only mode. */
+export interface LibraryFile { name: string; path: string; size: number; kind?: "quest" | "etc" | null }
 
-export const ENCRYPTIONS = ["Auto", "GMS", "EMS", "BMS", "CLASSIC", "GETFROMZLZ"] as const;
+/** One skill. `levels` is what each level does (or a single shared template); `hidden` skills are client-internal helpers. */
+export interface Skill { id: number; name: string | null; desc: string | null; maxLevel: number; hidden: boolean; levels: string[] }
+/** A job's skills (0 Beginner, 100 Warrior, 110 Fighter, ...) and its skill book's title. */
+export interface SkillBook { job: number; book: string | null; hasIcon: boolean; skills: Skill[] }
+
+/**
+ * A mob's stats from its info node in Mob data (anything it doesn't set is 0).
+ * `elements` is info/elemAttr as written: a letter per element (F fire, I ice, L lightning, S poison, H holy, D dark,
+ * P physical) followed by 1 immune, 2 resists or 3 weak, e.g. "F2I3". `link`: the mob it borrows its animations from.
+ */
+export interface Mob {
+  id: number; name: string | null; level: number; maxHp: number; maxMp: number; exp: number;
+  physicalAttack: number; magicAttack: number; physicalDefense: number; magicDefense: number;
+  accuracy: number; avoid: number; speed: number; boss: boolean; undead: boolean; elements: string | null; link: number | null;
+}
+
+/**
+ * A mob and the maps it spawns in (Etc's MobLocation.img, plus the maps whose life places it).
+ * `known`: the library's Mob data has it, so it has a sprite; Etc can list mobs an install no longer has.
+ */
+export interface MobLocation { id: number; name: string | null; maps: number[]; known: boolean }
+/** `mapNames`: map id -> "Street : Map" for every map listed. */
+export interface MobLocations { mobs: MobLocation[]; mapNames: Record<string, string> }
+
+/** A quest an NPC hands out (`starts`) and/or completes (`ends`). `archive` is the quest archive's library name. */
+export interface NpcQuest { id: number; name: string; archive: string; starts: boolean; ends: boolean }
+/** An NPC that at least one quest in the library starts or ends at. */
+export interface NpcQuests { id: number; name: string | null; quests: NpcQuest[] }
+
+export const ENCRYPTIONS =["Auto", "GMS", "EMS", "BMS", "CLASSIC", "GETFROMZLZ"] as const;
 
 /**
  * The default address for this deployment: `apiBase` in /config.json next to index.html (editable after a build,
@@ -167,10 +202,28 @@ export function createApi(base: string) {
     /**
      * `library`: the server is pinned to a folder, so files come from `library()` and `fs` is refused.
      * `readOnly`: this computer isn't the server's own, so it may view but not change anything.
+     * `browseOnly`: both, so only quest archives and Etc.wz are offered, through their own views (no raw tree).
+     * `skills`: the library has skill data, so `skills()` has something to show.
+     * `mobs`: the library has Mob data, so `mobs()` has something to show.
+     * `mobLocations`: the library's Etc has MobLocation.img, so `mobLocations()` has something to show.
+     * `npcs`: the library has a quest archive, so `npcQuests()` has something to show.
      */
-    health: () => request<{ status: string; port: number; version: string; library?: boolean; readOnly?: boolean }>("/api/health"),
+    health: () => request<{ status: string; port: number; version: string; library?: boolean; readOnly?: boolean; browseOnly?: boolean; skills?: boolean; mobs?: boolean; mobLocations?: boolean; npcs?: boolean }>("/api/health"),
     fs: (path = "") => request<FsListing>(`/api/fs?path=${q(path)}`),
     library: () => request<LibraryFile[]>("/api/library"),
+    /** Every job's skills in the library, ordered by job id. */
+    skills: () => request<SkillBook[]>("/api/skills"),
+    skillIconUrl: (id: number) => `${base}/api/skills/${id}/icon`,
+    skillBookIconUrl: (job: number) => `${base}/api/skills/books/${job}/icon`,
+    /** Every mob in the library's Mob data with its stats, ordered by mob id. */
+    mobs: () => request<Mob[]>("/api/mobs"),
+    /** Every mob with the maps it spawns in, ordered by mob id. */
+    mobLocations: () => request<MobLocations>("/api/mobs/locations"),
+    mobSpriteUrl: (id: number) => `${base}/api/mobs/${id}/sprite`,
+    mapMinimapUrl: (id: number) => `${base}/api/maps/${id}/minimap`,
+    /** Every NPC the library's quests start or end at, ordered by NPC id. */
+    npcQuests: () => request<NpcQuests[]>("/api/npcs/quests"),
+    npcSpriteUrl: (id: number) => `${base}/api/npcs/${id}/sprite`,
     files: () => request<OpenedFile[]>("/api/files"),
     open: (path: string, encryption: string) =>
       request<OpenedFile>("/api/files", {
@@ -184,6 +237,7 @@ export function createApi(base: string) {
     search: (id: string, query: string, depth = 3) => request<string[]>(`/api/files/${id}/search?q=${q(query)}&depth=${depth}`),
     quests: (id: string) => request<QuestSummary[]>(`/api/files/${id}/quests`),
     quest: (id: string, questId: number) => request<QuestDetail>(`/api/files/${id}/quests/${questId}`),
+    questChain: (id: string, questId: number) => request<QuestChain>(`/api/files/${id}/quests/${questId}/chain`),
     commodity: (id: string) => request<CommodityTable>(`/api/files/${id}/commodity`),
     /** Sets each `entry/property`, creating it as `type` when the entry doesn't have it. All or nothing. */
     setCommodity: (id: string, sets: CommoditySet[]) =>

@@ -1,5 +1,5 @@
 import { createContext, memo, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { LookupKind, LookupRequest, PropTree, QuestDetail } from "../lib/api";
+import type { LookupKind, LookupRequest, PropTree, QuestChain, QuestDetail } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import {
   JOB_NAMES, QUEST_STATES, STAGE_LABELS, formatMinutes, formatStamp, parseMapleText, refsInText, type TextColor,
@@ -7,6 +7,7 @@ import {
 import { useNames } from "../lib/use-names";
 import { Archive } from "./icons";
 import { RefCtx, RefIcon, RefLink } from "./ref-link";
+import { buttonSecondary } from "./ui";
 
 // ------------------------------------------------------------------ tree helpers
 
@@ -22,8 +23,8 @@ const LIST_KIND: Record<string, LookupKind> = { item: "item", mob: "mob", quest:
 const MAP_LISTS = new Set(["fieldEnter", "map"]);
 const ITEM_LISTS = new Set(["equipAllNeed", "equipSelectNeed"]);
 
-/** Every id a quest mentions, so all the names can be fetched in one request. */
-function collectIds(d: QuestDetail | null): LookupRequest {
+/** Every id these quests mention, so all the names can be fetched in one request. */
+function collectIds(ds: (QuestDetail | null)[]): LookupRequest {
   const out: LookupRequest = {};
   const push = (kind: LookupKind, id: number | undefined) => { if (id != null) (out[kind] ??= []).push(id); };
 
@@ -43,7 +44,7 @@ function collectIds(d: QuestDetail | null): LookupRequest {
     }
   };
 
-  if (d) for (const section of [d.info, d.check, d.say, d.act]) if (section) walk(section);
+  for (const d of ds) if (d) for (const section of [d.info, d.check, d.say, d.act]) if (section) walk(section);
   return out;
 }
 
@@ -352,6 +353,245 @@ function Dialogue({ node }: { node: PropTree }) {
   );
 }
 
+// ------------------------------------------------------------------ Chain
+
+interface ChainTotals {
+  exp: number;
+  money: number;
+  pop: number;
+  /** Item -> how many the chain's completion checks ask for in total, and how many the chain's own actions hand out. */
+  collect: Map<number, { need: number; given: number }>;
+  mobs: Map<number, number>;
+  /** What the player keeps: every item an action gives, less what a later action takes back. */
+  items: Map<number, number>;
+  /** Items given only by chance or to some jobs/genders, so they can't simply be added up. */
+  conditional: Map<number, number>;
+  skills: Set<number>;
+}
+
+const addTo = (m: Map<number, number>, id: number, n: number) => m.set(id, (m.get(id) ?? 0) + n);
+
+/** A reward that depends on luck, job or gender (gender 2 is "any"). */
+const isConditional = (it: PropTree) => child(it, "prop") != null || child(it, "job") != null || (int(child(it, "gender")) ?? 2) !== 2;
+
+function chainTotals(quests: QuestDetail[]): ChainTotals {
+  const t: ChainTotals = { exp: 0, money: 0, pop: 0, collect: new Map(), mobs: new Map(), items: new Map(), conditional: new Map(), skills: new Set() };
+  const given = new Map<number, number>();
+  for (const q of quests) {
+    const done = child(q.check, "1");
+    for (const it of kids(child(done, "item"))) {
+      // A count of 0 means "must not have it", which isn't something to collect.
+      const id = int(child(it, "id")), count = int(child(it, "count")) ?? 1;
+      if (id == null || count <= 0) continue;
+      const c = t.collect.get(id) ?? { need: 0, given: 0 };
+      c.need += count;
+      t.collect.set(id, c);
+    }
+    for (const m of kids(child(done, "mob"))) {
+      const id = int(child(m, "id")), count = int(child(m, "count")) ?? 1;
+      if (id != null && count > 0) addTo(t.mobs, id, count);
+    }
+    for (const stage of [child(q.act, "0"), child(q.act, "1")]) {
+      t.exp += int(child(stage, "exp")) ?? 0;
+      t.money += int(child(stage, "money")) ?? 0;
+      t.pop += int(child(stage, "pop")) ?? 0;
+      for (const it of kids(child(stage, "item"))) {
+        const id = int(child(it, "id")), count = int(child(it, "count")) ?? 1;
+        if (id == null) continue;
+        if (count > 0 && isConditional(it)) { addTo(t.conditional, id, count); continue; }
+        addTo(t.items, id, count);
+        if (count > 0) addTo(given, id, count);
+      }
+      for (const s of kids(child(stage, "skill"))) { const id = int(child(s, "id")); if (id != null) t.skills.add(id); }
+    }
+  }
+  for (const [id, c] of t.collect) c.given = given.get(id) ?? 0;
+  return t;
+}
+
+function Stat({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="min-w-0 rounded-xl bg-zinc-50 px-4 py-3 dark:bg-zinc-950/60">
+      <p className="text-xs text-zinc-500">{label}</p>
+      <p className="mt-0.5 truncate font-mono text-lg font-semibold tabular-nums">{value}</p>
+    </div>
+  );
+}
+
+const signed = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toLocaleString()}`;
+
+/** One line per quest: who starts and ends it, its level, and what it asks for and gives. */
+function ChainStep({ quest, index, viewing }: { quest: QuestDetail; index: number; viewing: boolean }) {
+  const start = child(quest.check, "0"), done = child(quest.check, "1");
+  const startNpc = int(child(start, "npc")), endNpc = int(child(done, "npc"));
+  const level = start && levelText(start);
+  const exp = (int(child(child(quest.act, "0"), "exp")) ?? 0) + (int(child(child(quest.act, "1"), "exp")) ?? 0);
+  const items = kids(child(done, "item")).filter((it) => (int(child(it, "count")) ?? 1) > 0).length;
+  const mobs = kids(child(done, "mob")).length;
+  const facts = [
+    level && `Lv ${level}`,
+    items > 0 && `${items} item${items === 1 ? "" : "s"} to bring`,
+    mobs > 0 && `${mobs} mob${mobs === 1 ? "" : "s"} to defeat`,
+    exp !== 0 && `${signed(exp)} EXP`,
+  ].filter(Boolean);
+
+  return (
+    <li className={`flex gap-3 rounded-xl px-3 py-2.5 ${viewing ? "bg-accent-50 dark:bg-accent-600/15" : ""}`}>
+      <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-md bg-zinc-200 font-mono text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{index + 1}</span>
+      <div className="min-w-0 space-y-1 text-[13px] leading-6">
+        <div><Ref kind="quest" id={quest.id} />{viewing && <> <Chip tone="emerald">Viewing</Chip></>}</div>
+        {(startNpc != null || endNpc != null) && (
+          <div className="text-zinc-500">
+            {startNpc != null && <>From <Ref kind="npc" id={startNpc} /></>}
+            {startNpc != null && endNpc != null && " · "}
+            {endNpc != null && endNpc !== startNpc && <>to <Ref kind="npc" id={endNpc} /></>}
+            {endNpc != null && endNpc === startNpc && "and back"}
+          </div>
+        )}
+        {facts.length > 0 && <div className="text-xs text-zinc-500">{facts.join(" · ")}</div>}
+      </div>
+    </li>
+  );
+}
+
+/** "Name (id) × n" for each entry. */
+const countList = (kind: LookupKind, entries: [number, number][]) => (
+  <List>{entries.map(([id, n]) => <li key={id}><Ref kind={kind} id={id} /><span className="whitespace-nowrap text-zinc-500"> × {n.toLocaleString()}</span></li>)}</List>
+);
+
+/**
+ * Totals for a chain, or (`selection`) for quests the user picked by hand, which needn't be related.
+ * The same sums apply either way; only the wording changes.
+ */
+function ChainSummary({ chain, questId, selection = false }: { chain: QuestChain; questId?: number; selection?: boolean }) {
+  const t = useMemo(() => chainTotals(chain.quests), [chain]);
+  const of = selection ? "the selected quests'" : "the chain's";
+  const by = selection ? "the selected quests" : "the chain";
+  const toCollect = [...t.collect].filter(([, c]) => c.need > c.given);
+  const toHandOver = [...t.collect].filter(([, c]) => c.need <= c.given);
+  const kept = [...t.items].filter(([, n]) => n > 0);
+  const firstLevel = (() => { const s = !selection && child(chain.quests[0]?.check, "0"); return s && levelText(s); })();
+
+  const questList = (qs: QuestChain["before"]) => <List>{qs.map((q) => <li key={q.id}><Ref kind="quest" id={q.id} /></li>)}</List>;
+
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-3 @2xl:grid-cols-4">
+        <Stat label="Quests" value={chain.quests.length} />
+        <Stat label="Experience" value={signed(t.exp)} />
+        <Stat label="Mesos" value={signed(t.money)} />
+        <Stat label="Fame" value={signed(t.pop)} />
+      </div>
+
+      <Card
+        title={selection ? "Quests" : "Steps"}
+        subtitle={selection ? "In the order they were picked." : `In play order${firstLevel ? `, starting at level ${firstLevel}` : ""}. Quests lead on through nextQuest, or by requiring the one before as their only completed quest.`}
+      >
+        {chain.before.length > 0 && <dl><Row label="Continues from">{questList(chain.before)}</Row></dl>}
+        <ol className="-mx-3 space-y-1">
+          {chain.quests.map((q, i) => <ChainStep key={q.id} quest={q} index={i} viewing={q.id === questId} />)}
+        </ol>
+        {chain.after.length > 0 && <dl><Row label={chain.after.length > 1 ? "Branches into" : "Leads into"}>{questList(chain.after)}</Row></dl>}
+      </Card>
+
+      <Card title="To do" subtitle={`Everything ${of} completion checks ask for, added up.`}>
+        {toCollect.length === 0 && toHandOver.length === 0 && t.mobs.size === 0 && <p className="text-sm text-zinc-400">Nothing to collect or defeat.</p>}
+        <dl className="space-y-3">
+          {toCollect.length > 0 && (
+            <Row label="Collect">
+              <List>{toCollect.map(([id, c]) => (
+                <li key={id}>
+                  <Ref kind="item" id={id} /><span className="whitespace-nowrap text-zinc-500"> × {(c.need - c.given).toLocaleString()}</span>
+                  {c.given > 0 && <div className="text-xs leading-5 text-zinc-500">{c.need.toLocaleString()} asked for, {c.given.toLocaleString()} handed out by {by}</div>}
+                </li>
+              ))}</List>
+            </Row>
+          )}
+          {t.mobs.size > 0 && <Row label="Defeat">{countList("mob", [...t.mobs])}</Row>}
+          {toHandOver.length > 0 && <Row label="Deliver">{countList("item", toHandOver.map(([id, c]): [number, number] => [id, c.need]))}<p className="text-xs leading-5 text-zinc-500">Given to you by {by} {selection ? "themselves" : "itself"}.</p></Row>}
+        </dl>
+      </Card>
+
+      <Card title="Rewards" subtitle={`Everything ${of} actions give, less items a later ${selection ? "one" : "step"} takes back.`}>
+        <dl className="space-y-3">
+          <Row label="Experience"><span className="font-mono">{signed(t.exp)}</span></Row>
+          <Row label="Mesos"><span className="font-mono">{signed(t.money)}</span></Row>
+          {t.pop !== 0 && <Row label="Fame"><span className="font-mono">{signed(t.pop)}</span></Row>}
+          {kept.length > 0 && <Row label="Items">{countList("item", kept)}</Row>}
+          {t.conditional.size > 0 && <Row label="Maybe">{countList("item", [...t.conditional])}<p className="text-xs leading-5 text-zinc-500">Given by chance, or only to some jobs or genders.</p></Row>}
+          {t.skills.size > 0 && <Row label="Skills"><List>{[...t.skills].map((id) => <li key={id}><Ref kind="skill" id={id} /></li>)}</List></Row>}
+        </dl>
+      </Card>
+    </>
+  );
+}
+
+// ------------------------------------------------------------------ selection
+
+/** A summary of several hand-picked quests, laid out like a chain's. */
+export const QuestSelectionView = memo(function QuestSelectionView({ fileId, revision, questIds, onOpenQuest, onClear }: {
+  fileId: string;
+  revision: number;
+  /** In the order they were picked. */
+  questIds: number[];
+  onOpenQuest: (id: number) => void;
+  onClear: () => void;
+}) {
+  const refs = useMemo(() => ({ fileId, openQuest: onOpenQuest }), [fileId, onOpenQuest]);
+  const { api } = useConnection();
+  // Quests already fetched, so ticking one more only loads that one. Dropped when the file changes.
+  const key = `${fileId}:${revision}`;
+  const [cache, setCache] = useState<{ key: string; quests: Map<number, QuestDetail> }>({ key: "", quests: new Map() });
+  const known = cache.key === key ? cache.quests : null;
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const missing = questIds.filter((id) => !known?.has(id));
+    if (!missing.length) return;
+    let cancelled = false;
+    Promise.all(missing.map((id) => api.quest(fileId, id))).then(
+      (ds) => {
+        if (cancelled) return;
+        setError(null);
+        setCache((c) => {
+          const quests = new Map(c.key === key ? c.quests : []);
+          for (const d of ds) quests.set(d.id, d);
+          return { key, quests };
+        });
+      },
+      (e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); },
+    );
+    return () => { cancelled = true; };
+  }, [api, fileId, key, questIds, known]);
+
+  const quests = useMemo(() => questIds.flatMap((id) => known?.get(id) ?? []), [questIds, known]);
+  const chain = useMemo<QuestChain>(() => ({ quests, before: [], after: [] }), [quests]);
+  const names = useNames(fileId, useMemo(() => collectIds(quests), [quests]), revision);
+  const loading = quests.length < questIds.length;
+
+  if (error) return <p role="alert" className="p-6 text-sm text-rose-600 dark:text-rose-400">{error}</p>;
+  if (!quests.length) {
+    return <div className="space-y-4 p-6">{[24, 56, 40].map((h, i) => <div key={i} className="skeleton rounded-xl bg-zinc-100 dark:bg-zinc-800" style={{ height: h * 3 }} />)}</div>;
+  }
+
+  return (
+    <RefCtx.Provider value={refs}>
+    <NamesCtx.Provider value={names}>
+      <div className="@container space-y-6 p-6">
+        <header className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-xl font-semibold tracking-tight">
+            {questIds.length} quests selected
+            {loading && <span className="ml-2 text-sm font-normal text-zinc-500">Loading…</span>}
+          </h2>
+          <button type="button" onClick={onClear} className={`${buttonSecondary} !py-1.5`}>Clear selection</button>
+        </header>
+        <ChainSummary chain={chain} selection />
+      </div>
+    </NamesCtx.Provider>
+    </RefCtx.Provider>
+  );
+});
+
 // ------------------------------------------------------------------ the view
 
 const INFO_HANDLED = new Set(["name", "parent", "area", "order", "0", "1", "2", "summary", "demandSummary", "rewardSummary", "type", "autoStart", "autoComplete", "autoAccept", "autoPreComplete", "oneShot"]);
@@ -361,7 +601,8 @@ export const QuestDetailView = memo(function QuestDetailView({ fileId, revision,
   fileId: string;
   revision: number;
   questId: number;
-  onOpenRaw: (path: string) => void;
+  /** Left out when there's no raw tree to show. */
+  onOpenRaw?: (path: string) => void;
   /** Jump to another quest in this archive (quest links). */
   onOpenQuest: (id: number) => void;
 }) {
@@ -380,9 +621,23 @@ export const QuestDetailView = memo(function QuestDetailView({ fileId, revision,
     return () => { cancelled = true; };
   }, [api, fileId, questId, revision]);
 
+  const [chain, setChain] = useState<QuestChain | null>(null);
+  const [view, setView] = useState<"quest" | "chain">("quest");
+  useEffect(() => {
+    let cancelled = false;
+    // Without a chain the quest is still shown, just with no Chain tab.
+    api.questChain(fileId, questId).then(
+      (c) => { if (!cancelled) setChain(c); },
+      () => { if (!cancelled) setChain(null); },
+    );
+    return () => { cancelled = true; };
+  }, [api, fileId, questId, revision]);
+
   // Don't flash the previous quest's data under the new heading while it loads.
   const current = detail?.id === questId ? detail : null;
-  const names = useNames(fileId, useMemo(() => collectIds(current), [current]), revision);
+  // Moving along the chain keeps it (and the tab) on screen until the refetch lands, since it's the same chain.
+  const currentChain = chain && chain.quests.length > 1 && chain.quests.some((q) => q.id === questId) ? chain : null;
+  const names = useNames(fileId, useMemo(() => collectIds([current, ...(currentChain?.quests ?? [])]), [current, currentChain]), revision);
 
   if (error) return <p role="alert" className="p-6 text-sm text-rose-600 dark:text-rose-400">{error}</p>;
   if (!current) {
@@ -416,7 +671,29 @@ export const QuestDetailView = memo(function QuestDetailView({ fileId, revision,
           </div>
         </header>
 
-        <Card title="About" subtitle={`${paths.info}: journal text and summaries`} onOpenRaw={() => onOpenRaw(paths.info)}>
+        {currentChain && (
+          <div role="tablist" aria-label="Quest view" className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
+            {(["quest", "chain"] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                role="tab"
+                aria-selected={view === t}
+                onClick={() => setView(t)}
+                className={`-mb-px rounded-t-lg border-b-2 px-4 py-2 text-[13px] font-medium transition ${
+                  view === t
+                    ? "border-accent-500 text-accent-700 dark:text-accent-300"
+                    : "border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                }`}
+              >
+                {t === "quest" ? "Quest" : `Chain · ${currentChain.quests.length} quests`}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {currentChain && view === "chain" ? <ChainSummary chain={currentChain} questId={questId} /> : <>
+        <Card title="About" subtitle={`${paths.info}: journal text and summaries`} onOpenRaw={onOpenRaw && (() => onOpenRaw(paths.info))}>
           {journal.length === 0 && summaries.length === 0 && <p className="text-sm text-zinc-400">No text.</p>}
           <div className="grid gap-4 @2xl:grid-cols-3">
             {journal.map(({ n, node }) => (
@@ -437,7 +714,7 @@ export const QuestDetailView = memo(function QuestDetailView({ fileId, revision,
           )}
         </Card>
 
-        <Card title="Requirements" subtitle={`${paths.check}: what the player must satisfy`} onOpenRaw={() => onOpenRaw(paths.check)}>
+        <Card title="Requirements" subtitle={`${paths.check}: what the player must satisfy`} onOpenRaw={onOpenRaw && (() => onOpenRaw(paths.check))}>
           <div className="grid gap-4 @2xl:grid-cols-2">
             {[0, 1].map((n) => {
               const s = stageOf(check, n);
@@ -448,7 +725,7 @@ export const QuestDetailView = memo(function QuestDetailView({ fileId, revision,
           {!check && <p className="text-sm text-zinc-400">Nothing at {paths.check}.</p>}
         </Card>
 
-        <Card title="Dialogue" subtitle={`${paths.say}: what the NPC says`} onOpenRaw={() => onOpenRaw(paths.say)}>
+        <Card title="Dialogue" subtitle={`${paths.say}: what the NPC says`} onOpenRaw={onOpenRaw && (() => onOpenRaw(paths.say))}>
           <div className="grid gap-4">
             {[0, 1].map((n) => {
               const s = stageOf(say, n);
@@ -459,7 +736,7 @@ export const QuestDetailView = memo(function QuestDetailView({ fileId, revision,
           {!say && <p className="text-sm text-zinc-400">Nothing at {paths.say}.</p>}
         </Card>
 
-        <Card title="Actions" subtitle={`${paths.act}: what happens in-game. A negative count takes an item, a positive one gives it.`} onOpenRaw={() => onOpenRaw(paths.act)}>
+        <Card title="Actions" subtitle={`${paths.act}: what happens in-game. A negative count takes an item, a positive one gives it.`} onOpenRaw={onOpenRaw && (() => onOpenRaw(paths.act))}>
           <div className="grid gap-4 @2xl:grid-cols-2">
             {[0, 1].map((n) => {
               const s = stageOf(act, n);
@@ -469,6 +746,7 @@ export const QuestDetailView = memo(function QuestDetailView({ fileId, revision,
           {extraStages(act).map((s) => <StageCard key={s.name} stage={s.name} label={`Entry “${s.name}”`} empty={!kids(s).length}><dl className="space-y-3">{kids(s).map((c) => <Generic key={c.name} node={c} />)}</dl></StageCard>)}
           {!act && <p className="text-sm text-zinc-400">Nothing at {paths.act}.</p>}
         </Card>
+        </>}
       </div>
     </NamesCtx.Provider>
     </RefCtx.Provider>

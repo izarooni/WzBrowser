@@ -228,7 +228,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "add", fileId: file.id, layout });
   }, []);
 
-  // Mirror whatever the API has open (e.g. after a page reload) as windows.
+  // Sync with what the API has open, closing windows for files it no longer has. Files it already had open
+  // (e.g. before a page reload) don't get windows: the page starts empty until a file is opened.
   useEffect(() => {
     if (status !== "online") return;
     let cancelled = false;
@@ -236,11 +237,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (cancelled) return;
       setFiles(Object.fromEntries(list.map((f) => [f.id, f])));
       dispatch({ type: "keep", ids: list.map((f) => f.id) });
-      const have = new Set(stateRef.current.wins.map((w) => w.fileId));
-      for (const f of list) if (!have.has(f.id)) addWindow(f);
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [api, status, addWindow]);
+  }, [api, status]);
 
   const openFile = useCallback((file: OpenedFile) => {
     upsert(file);

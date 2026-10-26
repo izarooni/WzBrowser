@@ -2,14 +2,21 @@ import type { MetaFunction } from "@remix-run/react";
 import { useRef, type PointerEvent, type WheelEvent } from "react";
 import { Squares } from "../components/icons";
 import { buttonPrimary } from "../components/ui";
+import { LibraryWiki } from "../components/library-wiki";
 import { WzWindow } from "../components/wz-window";
 import { useConnection } from "../lib/connection";
 import { useActions, useLayout } from "../lib/workspace";
 
 export const meta: MetaFunction = () => [{ title: "WzBrowser" }];
 
+/** Viewers who may only browse get the library as one page; everyone else gets the window workspace. */
+export default function Index() {
+  const { browseOnly } = useConnection();
+  return browseOnly ? <LibraryWiki /> : <Workspace />;
+}
+
 /** The workspace: a pannable canvas with one floating window per open WZ file. */
-export default function Workspace() {
+function Workspace() {
   const { status, recheck } = useConnection();
   const { wins, pan } = useLayout();
   const actions = useActions();

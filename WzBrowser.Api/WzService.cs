@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Drawing.Imaging;
 using MapleLib.WzLib;
 using MapleLib.WzLib.Util;
 using MapleLib.WzLib.WzProperties;
@@ -35,7 +34,8 @@ public record NodeEditRequest(string Path, string? Name, string? Value);
 public record NodeEditResult(string Path, NodeDto Node, OpenedFileDto File);
 
 /// <param name="Name">Path relative to the library folder, e.g. "Quest/QuestData/QuestData_000.wz".</param>
-public record LibraryFile(string Name, string Path, long Size);
+/// <param name="Kind">Set when the list was narrowed to browsable files: "quest" or "etc" (see <see cref="OpenedFileDto"/>).</param>
+public record LibraryFile(string Name, string Path, long Size, string? Kind = null);
 
 /// <summary>Holds opened WZ files and resolves slash-separated paths inside them.</summary>
 /// <param name="root">When set, only .wz files inside this folder can be opened or saved to (see <see cref="Library"/>).</param>
@@ -52,16 +52,51 @@ public sealed partial class WzService(string? root = null)
     /// Every .wz file under <see cref="Root"/>, by relative path. A modular folder's index stub ({name}.wz beside
     /// {name}_000.wz) is left out, since the data is in the parts.
     /// </summary>
-    public List<LibraryFile> Library()
+    /// <param name="browsableOnly">Only the files with a view of their own (quest archives and Etc.wz), each with its kind.</param>
+    public List<LibraryFile> Library(bool browsableOnly = false)
     {
         if (Root == null) throw new InvalidDataException("This server isn't pinned to a folder.");
         if (!Directory.Exists(Root)) throw new DirectoryNotFoundException($"Library folder not found: {Root}");
-        return Directory.EnumerateFiles(Root, "*.wz", SearchOption.AllDirectories)
+        var files = Directory.EnumerateFiles(Root, "*.wz", SearchOption.AllDirectories)
             .Where(f => !File.Exists(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(f)!, System.IO.Path.GetFileNameWithoutExtension(f) + "_000.wz")))
-            .Select(f => new LibraryFile(System.IO.Path.GetRelativePath(Root, f).Replace('\\', '/'), f, new FileInfo(f).Length))
-            .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+            .Select(f => new LibraryFile(System.IO.Path.GetRelativePath(Root, f).Replace('\\', '/'), f, new FileInfo(f).Length));
+        if (browsableOnly)
+            files = files.Select(f => f with { Kind = ProbeKind(f.Path) }).Where(f => IsBrowsable(f.Kind!));
+        return files.OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
+
+    /// <summary>Quest archives and Etc.wz have a view of their own; other files only have the raw tree.</summary>
+    public static bool IsBrowsable(string kind) => kind is "quest" or "etc";
+
+    /// <summary>Each file's kind, keyed by path and remembered until the file on disk changes.</summary>
+    private readonly ConcurrentDictionary<string, (DateTime Written, long Size, string Kind)> _kinds = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// What kind of file this is, which takes parsing it. A browsable file stays open (hidden), since it's likely to be
+    /// opened next; any other is closed again. "generic" when it can't be read.
+    /// </summary>
+    private string ProbeKind(string path)
+    {
+        var info = new FileInfo(path);
+        if (_kinds.TryGetValue(path, out var known) && known.Written == info.LastWriteTimeUtc && known.Size == info.Length) return known.Kind;
+        string kind;
+        if (_files.TryGetValue(FileId(path), out var open)) kind = open.Kind;
+        else
+        {
+            try
+            {
+                var dto = Open(path, null, hidden: true);
+                kind = dto.Kind;
+                if (!IsBrowsable(kind)) Close(dto.Id);
+            }
+            catch (Exception) { kind = "generic"; }
+        }
+        _kinds[path] = (info.LastWriteTimeUtc, info.Length, kind);
+        return kind;
+    }
+
+    private static string FileId(string fullPath) => Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(
+        System.Text.Encoding.UTF8.GetBytes(fullPath.ToLowerInvariant())))[..12].ToLowerInvariant();
 
     private static long _revisionCounter;
     private static long NextRevision() => Interlocked.Increment(ref _revisionCounter);
@@ -83,6 +118,8 @@ public sealed partial class WzService(string? root = null)
         public long Revision { get; set; } = NextRevision();
         /// <summary>Lazily created name lookups (String.wz); only used by quest and etc archives.</summary>
         public NameIndex? Names { get; set; }
+        /// <summary>Which quests lead into which, built the first time a chain is asked for (rebuilt after edits).</summary>
+        public QuestLinks? QuestLinks { get; set; }
         /// <summary>
         /// Opened internally (e.g. Item.wz for a tooltip image) and not listed until a link actually opens it.
         /// </summary>
@@ -101,14 +138,16 @@ public sealed partial class WzService(string? root = null)
 
     /// <param name="hidden">Open without listing it (used for sibling files read on behalf of a quest archive).
     /// Opening a hidden file normally makes it visible.</param>
-    public OpenedFileDto Open(string path, string? encryption, bool hidden = false)
+    /// <param name="browsableOnly">Refuse files without a view of their own (anything but quest archives and Etc.wz).</param>
+    public OpenedFileDto Open(string path, string? encryption, bool hidden = false, bool browsableOnly = false)
     {
         path = System.IO.Path.GetFullPath(path);
         if (!InRoot(path)) throw new UnauthorizedAccessException("Only files in this server's library folder can be opened.");
         if (!File.Exists(path)) throw new FileNotFoundException("WZ file not found.", path);
+        if (browsableOnly && !IsBrowsable(ProbeKind(path)))
+            throw new UnauthorizedAccessException("Only quest archives and Etc.wz can be viewed from here.");
 
-        var id = Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(
-            System.Text.Encoding.UTF8.GetBytes(path.ToLowerInvariant())))[..12].ToLowerInvariant();
+        var id = FileId(path);
         if (_files.TryGetValue(id, out var existing))
         {
             if (!hidden) existing.Hidden = false;
@@ -182,7 +221,10 @@ public sealed partial class WzService(string? root = null)
         return names.Count == 0 || names.Count(n => SaneName.IsMatch(n)) >= names.Count * 0.9;
     }
 
-    public IEnumerable<OpenedFileDto> List() => _files.Where(kv => !kv.Value.Hidden).Select(kv => Describe(kv.Key, kv.Value));
+    /// <param name="browsableOnly">Only quest archives and Etc.wz.</param>
+    public IEnumerable<OpenedFileDto> List(bool browsableOnly = false) => _files
+        .Where(kv => !kv.Value.Hidden && (!browsableOnly || IsBrowsable(kv.Value.Kind)))
+        .Select(kv => Describe(kv.Key, kv.Value));
 
     public bool Close(string id)
     {
@@ -282,24 +324,9 @@ public sealed partial class WzService(string? root = null)
         lock (entry.Lock)
         {
             var node = Resolve(entry.File, path);
-            return (node is WzImageProperty prop ? RenderCanvas(prop) : null)
+            return (node is WzImageProperty prop ? RenderCanvas(entry, prop) : null)
                 ?? throw new KeyNotFoundException("Node is not an image.");
         }
-    }
-
-    /// <summary>PNG bytes of a canvas property (following _inlink/_outlink and UOLs), or null if it isn't one.</summary>
-    private static byte[]? RenderCanvas(WzImageProperty prop)
-    {
-        using var bitmap = prop switch
-        {
-            WzCanvasProperty canvas => canvas.GetLinkedWzCanvasBitmap(),
-            _ when prop.GetLinkedWzImageProperty() is WzCanvasProperty linked => linked.GetLinkedWzCanvasBitmap(),
-            _ => null,
-        };
-        if (bitmap == null) return null;
-        using var ms = new MemoryStream();
-        bitmap.Save(ms, ImageFormat.Png);
-        return ms.ToArray();
     }
 
     /// <summary>

@@ -151,7 +151,7 @@ function ClipboardChip() {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const { status, readOnly } = useConnection();
+  const { status, readOnly, browseOnly } = useConnection();
   const { openPicker } = useActions();
 
   return (
@@ -168,8 +168,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                 View only
               </span>
             )}
-            <ClipboardChip />
-            <button type="button" className={`${buttonPrimary} !py-2`} disabled={status !== "online"} onClick={openPicker}>Open file…</button>
+            {/* Browse-only viewers see every file as a tab, so there's nothing to open or copy. */}
+            {!browseOnly && <ClipboardChip />}
+            {!browseOnly && <button type="button" className={`${buttonPrimary} !py-2`} disabled={status !== "online"} onClick={openPicker}>Open file…</button>}
             <StatusPill onClick={() => setSettingsOpen(true)} />
             <button
               type="button"

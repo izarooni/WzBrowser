@@ -17,6 +17,16 @@ interface Connection {
   library: boolean;
   /** This computer may only view: the server is another machine, and edits can only be made on its own. */
   readOnly: boolean;
+  /** A pinned server viewed from another computer: only the quest and Commodity views, never the raw tree. */
+  browseOnly: boolean;
+  /** The library has skill data to show (a pinned server only). */
+  skills: boolean;
+  /** The library has Mob data to show (a pinned server only). */
+  mobs: boolean;
+  /** The library has Etc's MobLocation.img to show (a pinned server only). */
+  mobLocations: boolean;
+  /** The library has a quest archive, so its NPCs' quests can be listed (a pinned server only). */
+  npcs: boolean;
   setBase: (base: string) => void;
   recheck: () => void;
 }
@@ -30,6 +40,11 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   const [apiVersion, setApiVersion] = useState<string | null>(null);
   const [library, setLibrary] = useState(false);
   const [readOnly, setReadOnly] = useState(false);
+  const [browseOnly, setBrowseOnly] = useState(false);
+  const [skills, setSkills] = useState(false);
+  const [mobs, setMobs] = useState(false);
+  const [mobLocations, setMobLocations] = useState(false);
+  const [npcs, setNpcs] = useState(false);
   const [defaultBase, setDefaultBase] = useState(DEFAULT_API_BASE);
   const [ready, setReady] = useState(false);
   const [tick, setTick] = useState(0);
@@ -60,6 +75,11 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
         setApiVersion(h.version);
         setLibrary(!!h.library);
         setReadOnly(!!h.readOnly);
+        setBrowseOnly(!!h.browseOnly);
+        setSkills(!!h.skills);
+        setMobs(!!h.mobs);
+        setMobLocations(!!h.mobLocations);
+        setNpcs(!!h.npcs);
       } catch {
         if (cancelled) return;
         setStatus("offline");
@@ -82,8 +102,8 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   const recheck = useCallback(() => setTick((t) => t + 1), []);
 
   const value = useMemo(
-    () => ({ api, base, defaultBase, status, apiVersion, library, readOnly, setBase, recheck }),
-    [api, base, defaultBase, status, apiVersion, library, readOnly, setBase, recheck],
+    () => ({ api, base, defaultBase, status, apiVersion, library, readOnly, browseOnly, skills, mobs, mobLocations, npcs, setBase, recheck }),
+    [api, base, defaultBase, status, apiVersion, library, readOnly, browseOnly, skills, mobs, mobLocations, npcs, setBase, recheck],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

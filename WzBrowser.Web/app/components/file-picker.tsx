@@ -1,9 +1,9 @@
-import { Combobox, ComboboxButton, ComboboxInput, ComboboxOption, ComboboxOptions, Dialog, DialogBackdrop, DialogPanel, DialogTitle, Listbox, ListboxButton, ListboxOption, ListboxOptions } from "@headlessui/react";
+import { Dialog, DialogBackdrop, DialogPanel, DialogTitle, Listbox, ListboxButton, ListboxOption, ListboxOptions } from "@headlessui/react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { ENCRYPTIONS, type FsListing, type LibraryFile, type OpenedFile } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { ArrowUp, Check, ChevronUpDown, Document, Folder, XMark } from "./icons";
-import { buttonPrimary, buttonSecondary, inputClass } from "./ui";
+import { buttonSecondary, inputClass } from "./ui";
 
 const LAST_DIR_KEY = "wzbrowser.lastDir";
 
@@ -201,14 +201,44 @@ function FolderPicker({ open, onClose, onOpened }: PickerProps) {
   );
 }
 
-/** A pinned server's files in one dropdown; typing narrows it (matches anywhere in the relative path). */
+/** "Quest/QuestData/QuestData_000.wz" -> "QuestData": the file name without its extension or split-archive suffix. */
+const baseLabel = (name: string) => name.split("/").pop()!.replace(/\.wz$/i, "").replace(/_\d{3}$/, "");
+
+/** Short button labels. Names that would repeat (each folder's _Canvas) get their parent folders until they don't. */
+export function libraryLabels(files: LibraryFile[]): Map<string, string> {
+  const labels = new Map<string, string>();
+  const groups = new Map<string, LibraryFile[]>();
+  for (const f of files) {
+    const base = baseLabel(f.name);
+    groups.set(base, [...(groups.get(base) ?? []), f]);
+  }
+  for (const [base, group] of groups) {
+    if (group.length === 1) { labels.set(group[0].path, base); continue; }
+    // Parent folders, nearest first, skipping one named like the file itself (Etc/Etc_000.wz).
+    const parents = group.map((f) => f.name.split("/").slice(0, -1).reverse().filter((p) => p !== base));
+    // Only the labels that still clash get another folder, so one clash doesn't lengthen the rest.
+    const depth = group.map(() => 1);
+    const label = (i: number) => parents[i].slice(0, depth[i]).reverse().concat(base).join(" / ");
+    for (let grew = true; grew;) {
+      grew = false;
+      const counts = new Map<string, number>();
+      group.forEach((_, i) => counts.set(label(i), (counts.get(label(i)) ?? 0) + 1));
+      group.forEach((_, i) => {
+        if (counts.get(label(i))! > 1 && depth[i] < parents[i].length) { depth[i]++; grew = true; }
+      });
+    }
+    group.forEach((f, i) => labels.set(f.path, label(i)));
+  }
+  return labels;
+}
+
+/** A pinned server's files as a column of buttons; a filter appears once there are many (matches the label or path). */
 function LibraryPicker({ open, onClose, onOpened }: PickerProps) {
-  const { api, status } = useConnection();
+  const { api, status, browseOnly } = useConnection();
   const [files, setFiles] = useState<LibraryFile[] | null>(null);
-  const [selected, setSelected] = useState<LibraryFile | null>(null);
   const [query, setQuery] = useState("");
   const [encryption, setEncryption] = useState("Auto");
-  const [opening, setOpening] = useState(false);
+  const [opening, setOpening] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -221,22 +251,22 @@ function LibraryPicker({ open, onClose, onOpened }: PickerProps) {
     return () => { cancelled = true; };
   }, [open, status, api]);
 
+  const labels = useMemo(() => libraryLabels(files ?? []), [files]);
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!files) return [];
-    return needle ? files.filter((f) => f.name.toLowerCase().includes(needle)) : files;
-  }, [files, query]);
+    return needle ? files.filter((f) => f.name.toLowerCase().includes(needle) || labels.get(f.path)!.toLowerCase().includes(needle)) : files;
+  }, [files, labels, query]);
 
-  const openFile = async (file: LibraryFile | null) => {
-    if (!file) return;
-    setOpening(true);
+  const openFile = async (file: LibraryFile) => {
+    setOpening(file.path);
     setError(null);
     try {
       onOpened(await api.open(file.path, encryption));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setOpening(false);
+      setOpening(null);
     }
   };
 
@@ -251,7 +281,9 @@ function LibraryPicker({ open, onClose, onOpened }: PickerProps) {
           <div className="flex items-start justify-between gap-6">
             <div className="space-y-2">
               <DialogTitle className="text-xl font-semibold">Open a WZ file</DialogTitle>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">Pick one of the files this server offers.</p>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                {browseOnly ? "Pick a quest archive or Etc.wz to browse its quests or Cash Shop entries." : "Pick one of the files this server offers."}
+              </p>
             </div>
             <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800">
               <XMark className="size-5" />
@@ -261,42 +293,44 @@ function LibraryPicker({ open, onClose, onOpened }: PickerProps) {
           {status !== "online" ? (
             <p className="py-10 text-center text-sm text-zinc-500">The WzBrowser API isn't reachable. Start WzBrowser.exe, then try again.</p>
           ) : (
-            <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); openFile(selected); }}>
-              <Combobox value={selected} onChange={setSelected} onClose={() => setQuery("")} disabled={!files || opening}>
-                <div className="relative">
-                  <ComboboxInput
-                    aria-label="File"
-                    autoFocus
-                    displayValue={(f: LibraryFile | null) => f?.name ?? ""}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder={files ? `${files.length} files, type to filter` : "Loading files…"}
-                    spellCheck={false}
-                    className={`${inputClass} pr-10 font-mono`}
-                  />
-                  <ComboboxButton aria-label="Show all files" className="absolute inset-y-0 right-0 flex items-center px-3">
-                    <ChevronUpDown className="size-4 text-zinc-400" />
-                  </ComboboxButton>
-                </div>
-                <ComboboxOptions
-                  anchor="bottom start"
-                  transition
-                  className="z-[60] max-h-80 w-(--input-width) overflow-y-auto rounded-xl border border-zinc-200 bg-white p-2 shadow-lg transition duration-100 [--anchor-gap:6px] empty:invisible focus:outline-none data-[closed]:opacity-0 dark:border-zinc-700 dark:bg-zinc-900"
-                >
+            <div className="space-y-5">
+              {files && files.length > 10 && (
+                <input
+                  aria-label="Filter files"
+                  autoFocus
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={`${files.length} files, type to filter`}
+                  spellCheck={false}
+                  className={inputClass}
+                />
+              )}
+              {!files ? (
+                <div className="space-y-2">{Array.from({ length: 3 }, (_, i) => <div key={i} className="skeleton h-12 rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
+              ) : files.length === 0 ? (
+                <p className="text-sm text-zinc-500">{browseOnly ? "The library folder has no quest archives or Etc.wz." : "The library folder has no .wz files."}</p>
+              ) : (
+                <ul className="-mx-2 max-h-[50dvh] space-y-1 overflow-y-auto px-2">
                   {visible.map((f) => (
-                    <ComboboxOption
-                      key={f.path}
-                      value={f}
-                      className="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm data-[focus]:bg-accent-50 dark:data-[focus]:bg-zinc-800"
-                    >
-                      <Document className="size-4 shrink-0 text-accent-500" />
-                      <span className="min-w-0 flex-1 truncate font-mono">{f.name}</span>
-                      <span className="text-xs tabular-nums text-zinc-400">{formatSize(f.size)}</span>
-                      <Check className="invisible size-4 text-accent-600 group-data-[selected]:visible" />
-                    </ComboboxOption>
+                    <li key={f.path}>
+                      <button
+                        type="button"
+                        title={f.name}
+                        disabled={opening !== null}
+                        onClick={() => openFile(f)}
+                        className="flex w-full items-center gap-4 rounded-xl border border-zinc-200 px-4 py-3 text-left text-sm transition hover:border-accent-300 hover:bg-accent-50 disabled:opacity-60 dark:border-zinc-800 dark:hover:border-zinc-700 dark:hover:bg-zinc-800/70"
+                      >
+                        <Document className="size-5 shrink-0 text-accent-500" />
+                        <span className="min-w-0 flex-1 truncate font-medium">{labels.get(f.path)}</span>
+                        {opening === f.path
+                          ? <span className="animate-pulse text-xs text-zinc-500">Opening…</span>
+                          : f.kind && <span className="shrink-0 text-xs text-zinc-400">{f.kind === "quest" ? "Quests" : "Cash Shop"}</span>}
+                      </button>
+                    </li>
                   ))}
-                </ComboboxOptions>
-              </Combobox>
-              {files?.length === 0 && <p className="text-sm text-zinc-500">The library folder has no .wz files.</p>}
+                  {visible.length === 0 && <li className="px-4 py-6 text-center text-sm text-zinc-500">No files match.</li>}
+                </ul>
+              )}
 
               <div className="flex items-center gap-4">
                 <span className="text-sm font-medium text-zinc-600 dark:text-zinc-300">Encryption</span>
@@ -309,11 +343,7 @@ function LibraryPicker({ open, onClose, onOpened }: PickerProps) {
                 </div>
               )}
 
-              <div className="flex justify-end gap-3">
-                <button type="button" className={buttonSecondary} onClick={onClose}>Cancel</button>
-                <button type="submit" className={buttonPrimary} disabled={!selected || opening}>{opening ? "Opening…" : "Open"}</button>
-              </div>
-            </form>
+            </div>
           )}
         </DialogPanel>
       </div>

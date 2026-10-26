@@ -96,15 +96,50 @@ app.Use(async (ctx, next) =>
     await next();
 });
 
+// A library viewed from another computer shows only the quest and Commodity views: no raw tree, node values, images
+// or sounds, and no links into other files (they open in the raw tree). Name lookups and link previews stay.
+bool BrowseOnly(HttpContext ctx) => wzService.Root != null && IsRemote(ctx);
+var rawRoutes = new System.Text.RegularExpressions.Regex(@"^/api/files/[^/]+/(children|search|node|png|sound|objref|ref/open)/?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+app.Use(async (ctx, next) =>
+{
+    if (BrowseOnly(ctx) && rawRoutes.IsMatch(ctx.Request.Path.Value ?? ""))
+    {
+        ctx.Response.StatusCode = 403;
+        await ctx.Response.WriteAsJsonAsync(new { error = "Only the quest and Commodity views are available from here." });
+        return;
+    }
+    await next();
+});
+
 var api = app.MapGroup("/api");
 
 // `library` tells the web app this server is pinned to a folder: it then lists /library instead of browsing /fs,
 // and keeps its API address fixed. `readOnly`: this caller is on another computer (or behind a proxy) and may only view.
+// `browseOnly`: both, so only quest archives and Etc.wz are offered, and only through their own views.
 api.MapGet("/health", (WzService wz, HttpContext ctx) =>
-    new { status = "ok", port, version = "1.0.0", library = wz.Root != null, readOnly = IsRemote(ctx) });
+    new { status = "ok", port, version = "1.0.0", library = wz.Root != null, readOnly = IsRemote(ctx), browseOnly = BrowseOnly(ctx), skills = wz.HasSkills, mobs = wz.HasMobs, mobLocations = wz.HasMobLocations, npcs = wz.HasNpcQuests });
 
 // ---- the files a pinned server offers ----
-api.MapGet("/library", (WzService wz) => wz.Library());
+api.MapGet("/library", (WzService wz, HttpContext ctx) => wz.Library(browsableOnly: BrowseOnly(ctx)));
+// Every job's skills across the library (Skill.wz or a Packs/Skill_*.ms pack, with String's names), and their icons.
+api.MapGet("/skills", (WzService wz) => wz.Skills());
+api.MapGet("/skills/{id:int}/icon", (int id, HttpContext ctx, WzService wz) => LibraryPng(wz.SkillIcon(id), ctx));
+api.MapGet("/skills/books/{job:int}/icon", (int job, HttpContext ctx, WzService wz) => LibraryPng(wz.SkillBookIcon(job), ctx));
+// Every mob in the library's Mob data with its stats (level, HP, EXP, attack, defence, ...) and String's name.
+api.MapGet("/mobs", (WzService wz) => wz.Mobs());
+// Etc's MobLocation.img: each mob and the maps it spawns in, with names, the mob's sprite and the maps' minimaps.
+api.MapGet("/mobs/locations", (WzService wz) => wz.MobLocations());
+api.MapGet("/mobs/{id:int}/sprite", (int id, HttpContext ctx, WzService wz) => LibraryPng(wz.MobSprite(id), ctx));
+api.MapGet("/maps/{id:int}/minimap", (int id, HttpContext ctx, WzService wz) => LibraryPng(wz.MapMinimap(id), ctx));
+// The NPCs the library's quests start and end at, with the quests, and each NPC's sprite.
+api.MapGet("/npcs/quests", (WzService wz) => wz.NpcQuests());
+api.MapGet("/npcs/{id:int}/sprite", (int id, HttpContext ctx, WzService wz) => LibraryPng(wz.NpcSprite(id), ctx));
+static IResult LibraryPng(byte[]? png, HttpContext ctx)
+{
+    if (png == null) return Results.NotFound();
+    ctx.Response.Headers.CacheControl = "private, max-age=300";
+    return Results.File(png, "image/png");
+}
 
 // ---- local file system browsing (for the folder / file picker) ----
 api.MapGet("/fs", (string? path, WzService wz) =>
@@ -135,8 +170,8 @@ api.MapGet("/fs", (string? path, WzService wz) =>
 });
 
 // ---- WZ files ----
-api.MapGet("/files", (WzService wz) => wz.List());
-api.MapPost("/files", (OpenRequest req, WzService wz) => wz.Open(req.Path, req.Encryption));
+api.MapGet("/files", (WzService wz, HttpContext ctx) => wz.List(browsableOnly: BrowseOnly(ctx)));
+api.MapPost("/files", (OpenRequest req, WzService wz, HttpContext ctx) => wz.Open(req.Path, req.Encryption, browsableOnly: BrowseOnly(ctx)));
 api.MapDelete("/files/{id}", (string id, WzService wz) => wz.Close(id) ? Results.NoContent() : Results.NotFound());
 api.MapGet("/files/{id}/children", (string id, string? path, WzService wz) => wz.Children(id, path));
 api.MapGet("/files/{id}/search", (string id, string q, int? depth, WzService wz) => wz.Search(id, q, depth ?? 3));
@@ -150,6 +185,7 @@ api.MapPost("/files/{id}/revert", (string id, WzService wz) => wz.Revert(id));
 // Quest archives (Quest.wz): list, per-quest detail from the four images, and id -> name lookups.
 api.MapGet("/files/{id}/quests", (string id, WzService wz) => wz.Quests(id));
 api.MapGet("/files/{id}/quests/{questId:int}", (string id, int questId, WzService wz) => wz.Quest(id, questId));
+api.MapGet("/files/{id}/quests/{questId:int}/chain", (string id, int questId, WzService wz) => wz.QuestChain(id, questId));
 api.MapPost("/files/{id}/lookup", (string id, LookupRequest req, WzService wz) => wz.Lookup(id, req));
 // Etc.wz's Commodity.img (Cash Shop entries): the whole table, set one value, add an entry with a generated SN.
 api.MapGet("/files/{id}/commodity", (string id, WzService wz) => wz.Commodity(id));

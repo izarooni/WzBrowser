@@ -15,7 +15,8 @@ internal static class WzLayout
     public static (List<string> Files, string Path)? Find(string archivePath, string top, string path)
     {
         var classic = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(archivePath)!, top + ".wz");
-        if (File.Exists(classic)) return ([classic], path);
+        // In a modular install the archive can sit beside its own index stub (Data/Npc/Npc.wz next to Npc_000.wz).
+        if (File.Exists(classic) && !File.Exists(System.IO.Path.ChangeExtension(classic, null) + "_000.wz")) return ([classic], path);
         if (DataRoot(archivePath) is not { } root) return null;
 
         var dir = System.IO.Path.Combine(root, top);

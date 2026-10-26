@@ -35,10 +35,11 @@ interface Tip { left: number; top: number; anchorTop: number; above: boolean; w:
 /**
  * A link to an item, NPC, mob, map, skill or quest. Clicking opens it (quests jump within the quest window; everything
  * else opens the WZ file that holds it and reveals the node). Hovering shows its picture, when it has one.
+ * Browse-only viewers have no raw tree, so only quest links can be clicked there.
  */
 export function RefLink({ kind, id, name, children }: { kind: LookupKind; id: number; name?: string; children: ReactNode }) {
   const ctx = useContext(RefCtx);
-  const { api } = useConnection();
+  const { api, browseOnly } = useConnection();
   const actions = useActions();
   const [tip, setTip] = useState<Tip | null>(null);
   const anchor = useRef<HTMLAnchorElement>(null);
@@ -56,6 +57,7 @@ export function RefLink({ kind, id, name, children }: { kind: LookupKind; id: nu
   if (!ctx) return <>{children}</>;
 
   const url = kind === "quest" ? null : api.previewUrl(ctx.fileId, kind, id);
+  const clickable = kind === "quest" || !browseOnly;
 
   const show = () => {
     if (!url || hovering.current) return;
@@ -81,6 +83,7 @@ export function RefLink({ kind, id, name, children }: { kind: LookupKind; id: nu
   const onClick = (e: MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (!clickable) return;
     hide();
     if (kind === "quest") ctx.openQuest(id);
     else void actions.followRef(ctx.fileId, kind, id);
@@ -99,7 +102,8 @@ export function RefLink({ kind, id, name, children }: { kind: LookupKind; id: nu
         onMouseLeave={hide}
         onFocus={show}
         onBlur={hide}
-        className="cursor-pointer underline decoration-current/40 decoration-dotted underline-offset-4 transition hover:decoration-solid hover:decoration-current focus-visible:rounded focus-visible:outline-2 focus-visible:outline-accent-500"
+        aria-disabled={!clickable || undefined}
+        className={`${clickable ? "cursor-pointer" : "cursor-default"} underline decoration-current/40 decoration-dotted underline-offset-4 transition hover:decoration-solid hover:decoration-current focus-visible:rounded focus-visible:outline-2 focus-visible:outline-accent-500`}
       >
         {children}
       </a>

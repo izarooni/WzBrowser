@@ -1,4 +1,5 @@
 import { memo, useRef, useState, type PointerEvent } from "react";
+import { useConnection } from "../lib/connection";
 import { MIN_H, MIN_W, useActions, useWorkspaceData, type Win } from "../lib/workspace";
 import { Archive, Download, Minus, Plus, Undo, XMark } from "./icons";
 import { CommodityEditor } from "./commodity-editor";
@@ -16,12 +17,14 @@ const iconButton =
 export const WzWindow = memo(function WzWindow({ win, focused }: { win: Win; focused: boolean }) {
   const actions = useActions();
   const { files } = useWorkspaceData();
+  const { browseOnly } = useConnection();
   const file = files[win.fileId];
   const gesture = useRef<Gesture | null>(null);
   // Quest archives open on the quest browser and Etc.wz on the Commodity table; the raw tree is one tab away.
   const [tab, setTab] = useState<"main" | "raw">("main");
   const mainLabel = file?.kind === "quest" ? "Quests" : file?.kind === "etc" ? "Commodity" : null;
-  const openRaw = (path: string) => { setTab("raw"); actions.reveal(win.fileId, path); };
+  // Browse-only viewers get the main view alone: no tabs, no raw tree, no "show in raw tree" buttons.
+  const openRaw = browseOnly ? undefined : (path: string) => { setTab("raw"); actions.reveal(win.fileId, path); };
 
   const begin = (e: PointerEvent<HTMLElement>, g: Gesture) => {
     if (e.button !== 0) return;
@@ -117,7 +120,7 @@ export const WzWindow = memo(function WzWindow({ win, focused }: { win: Win; foc
         </button>
       </header>
 
-      {!win.collapsed && mainLabel && (
+      {!win.collapsed && mainLabel && !browseOnly && (
         <div role="tablist" aria-label="View" className="flex shrink-0 gap-1 border-b border-zinc-100 px-4 pt-2 dark:border-zinc-800">
           {(["main", "raw"] as const).map((t) => (
             <button
@@ -139,16 +142,19 @@ export const WzWindow = memo(function WzWindow({ win, focused }: { win: Win; foc
       )}
       {/* Both views stay mounted (the inactive one is hidden) so the raw tree keeps its state and can be revealed from the main view. */}
       {!win.collapsed && mainLabel && (
-        <div className={tab === "main" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+        <div className={tab === "main" || browseOnly ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
           {file?.kind === "quest"
             ? <QuestBrowser fileId={win.fileId} revision={file.revision} onOpenRaw={openRaw} />
             : <CommodityEditor fileId={win.fileId} revision={file!.revision} onOpenRaw={openRaw} />}
         </div>
       )}
-      {!win.collapsed && (
+      {!win.collapsed && !browseOnly && (
         <div className={mainLabel && tab === "main" ? "hidden" : "flex min-h-0 flex-1 flex-col"}>
           <NodeTree fileId={win.fileId} />
         </div>
+      )}
+      {!win.collapsed && browseOnly && !mainLabel && (
+        <p className="grid flex-1 place-items-center p-8 text-center text-sm text-zinc-500">This file has no view of its own.</p>
       )}
       </div>
 

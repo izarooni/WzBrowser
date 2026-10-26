@@ -29,9 +29,10 @@ public sealed partial class WzService
     }
 
     /// <summary>A small picture for the referenced thing (icon, standing sprite, minimap), or null if there is none.</summary>
-    public byte[]? RefPreview(string questId, string kind, int id)
+    public byte[]? RefPreview(string questId, string kind, int id) => Preview(LocateRef(questId, kind, id), kind);
+
+    private byte[]? Preview(RefLoc? loc, string kind)
     {
-        var loc = LocateRef(questId, kind, id);
         if (loc == null) return null;
         var entry = Get(loc.FileId);
         lock (entry.Lock)
@@ -54,21 +55,22 @@ public sealed partial class WzService
             foreach (var rel in candidates)
             {
                 var prop = Sub(rel);
-                if (prop != null && FirstCanvas(prop) is { } canvas && RenderCanvas(canvas) is { } png) return png;
+                if (prop != null && FirstCanvas(prop) is { } canvas && RenderCanvas(entry, canvas) is { } png) return png;
             }
             // A map without a minimap has no sensible single picture; everything else falls back to any canvas below it.
             IEnumerable<WzImageProperty>? below = node switch { WzImage i => i.WzProperties, WzImageProperty p => p.WzProperties, _ => null };
-            if (kind != "map" && below != null && FirstCanvas(below) is { } any) return RenderCanvas(any);
+            if (kind != "map" && below != null && FirstCanvas(below) is { } any) return RenderCanvas(entry, any);
             return null;
         }
     }
 
     // ------------------------------------------------------------------ locating
 
-    private RefLoc? LocateRef(string questId, string kind, int id)
-    {
-        var archive = GetLinkingArchive(questId).Path;
+    private RefLoc? LocateRef(string questId, string kind, int id) => LocateNear(GetLinkingArchive(questId).Path, kind, id);
 
+    /// <param name="archive">The file whose neighbours hold the thing (a quest archive, Etc.wz, or one of their parts).</param>
+    private RefLoc? LocateNear(string archive, string kind, int id)
+    {
         switch (kind)
         {
             case "npc":
