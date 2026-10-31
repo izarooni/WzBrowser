@@ -11,7 +11,8 @@ public record NodeDto(
     bool HasChildren,
     string? Value = null,
     int? Width = null,
-    int? Height = null);
+    int? Height = null,
+    string? Format = null);
 
 /// <param name="Kind">"quest" for a quest archive (QuestInfo.img + Check.img at the root, or the modular QuestData with
 /// one {id}.img per quest), "etc" for one with
@@ -640,7 +641,8 @@ public sealed partial class WzService(string? root = null)
         WzImage i => new NodeDto(i.Name, "image", true),
         WzCanvasProperty c => new NodeDto(c.Name, "canvas", c.WzProperties?.Count > 0,
             Width: c.PngProperty?.Width, Height: c.PngProperty?.Height,
-            Value: c.PngProperty is { } png ? $"{png.Width}x{png.Height}" : null),
+            Value: c.PngProperty is { } png ? $"{png.Width}x{png.Height}" : null,
+            Format: c.PngProperty is { } fmt ? FormatKey(fmt.Format) : null),
         WzVectorProperty v => new NodeDto(v.Name, "vector", false, $"{v.X.Value}, {v.Y.Value}"),
         WzBinaryProperty s => new NodeDto(s.Name, "sound", false, $"{s.Length} ms"),
         WzUOLProperty u => new NodeDto(u.Name, "uol", false, u.Value),

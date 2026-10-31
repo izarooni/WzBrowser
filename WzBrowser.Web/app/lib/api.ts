@@ -16,6 +16,8 @@ export interface WzNode {
   value: string | null;
   width: number | null;
   height: number | null;
+  /** A canvas' pixel format, e.g. "argb4444" (see lib/image-quality). */
+  format?: string | null;
 }
 
 export interface OpenedFile {
@@ -318,7 +320,19 @@ export function createApi(base: string) {
     save: (id: string) =>
       request<SaveResult>(`/api/files/${id}/save`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }),
     revert: (id: string) => request<OpenedFile>(`/api/files/${id}/revert`, { method: "POST" }),
-    pngUrl: (id: string, path: string) => `${base}/api/files/${id}/png?path=${q(path)}`,
+    /** `revision` (the file's) makes the address change after an edit, so the browser doesn't show a cached picture. */
+    pngUrl: (id: string, path: string, revision?: number) =>
+      `${base}/api/files/${id}/png?path=${q(path)}${revision != null ? `&v=${revision}` : ""}`,
+    /**
+     * Replaces a canvas' picture with this image file (PNG, JPEG, BMP or GIF), stored as `quality` (an IMAGE_QUALITIES
+     * value; lossless when left out). Removes any _inlink/_outlink.
+     */
+    setPng: (id: string, path: string, image: Blob, quality?: string) =>
+      request<NodeEditResult>(`/api/files/${id}/png?path=${q(path)}${quality ? `&quality=${q(quality)}` : ""}`, {
+        method: "PUT",
+        headers: { "Content-Type": image.type || "application/octet-stream" },
+        body: image,
+      }),
     /** For a placed map object (`.../obj/N` or one of its children), the sprite it refers to in `Obj/`. */
     /** Undefined when the node isn't a map object; throws when it is but the sprite can't be found. */
     objRef: (id: string, path: string) => request<ObjRef | undefined>(`/api/files/${id}/objref?path=${q(path)}`),

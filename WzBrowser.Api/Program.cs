@@ -208,6 +208,15 @@ api.MapGet("/files/{id}/preview", (string id, string kind, int refId, HttpContex
 });
 api.MapGet("/files/{id}/png", (string id, string path, WzService wz) =>
     Results.File(wz.Png(id, path), "image/png"));
+// Replaces a canvas' picture; the request body is the image file itself (PNG, JPEG, BMP or GIF).
+// `quality`: the pixel format to store: bgra8888 (lossless, the default), argb4444, argb1555, rgb565, dxt3, dxt5
+// (Big Bang+ clients only), or keep. What each loses is documented at the top of WzService.CanvasUpload.cs.
+api.MapPut("/files/{id}/png", async (string id, string path, string? quality, HttpRequest req, WzService wz) =>
+{
+    using var ms = new MemoryStream();
+    await req.Body.CopyToAsync(ms);
+    return wz.SetPng(id, path, ms.ToArray(), quality);
+});
 // A placed map object (Map/.../obj/N) -> the sprite it shows, at Obj/{oS}.img/{l0}/{l1}/{l2}.
 // 204 when the node isn't a map object; 404 when it is but the sprite can't be found.
 api.MapGet("/files/{id}/objref", (string id, string path, WzService wz) =>

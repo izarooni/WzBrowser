@@ -3,8 +3,9 @@ import type { ObjRef, WzNode } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { baseName, canPaste, joinPath, parentPath } from "../lib/paths";
 import { dnd, useActions, useWorkspaceData, type ClipItem, type TreeEvent } from "../lib/workspace";
-import { ChevronRight, Copy, Document, ExclamationTriangle, Folder, Music, Photo, Search, XMark } from "./icons";
+import { ArrowUp, ChevronRight, Copy, Document, Download, ExclamationTriangle, Folder, Music, Photo, Search, XMark } from "./icons";
 import { EDITABLE, invalid } from "../lib/values";
+import { IMAGE_QUALITIES, formatName, loadImageQuality, saveImageQuality } from "../lib/image-quality";
 import { inputClass } from "./ui";
 
 type Level =
@@ -503,12 +504,18 @@ function Detail({ fileId, path, node, fileName, childCount, canPasteHere, onCopy
   onPaste: () => void;
   onDelete: () => void;
 }) {
-  const { api } = useConnection();
+  const { api, readOnly } = useConnection();
   const ws = useActions();
+  const revision = useWorkspaceData().files[fileId]?.revision;
   const [zoom, setZoom] = useState(1);
   const [imgFailed, setImgFailed] = useState(false);
   const [copied, setCopied] = useState(false);
-  useEffect(() => { setZoom(1); setImgFailed(false); setCopied(false); }, [path]);
+  const [busy, setBusy] = useState(false);
+  const [dropping, setDropping] = useState(false);
+  const [quality, setQuality] = useState(loadImageQuality);
+  const fileInput = useRef<HTMLInputElement>(null);
+  useEffect(() => { setZoom(1); setImgFailed(false); setCopied(false); setDropping(false); }, [path]);
+  useEffect(() => { setImgFailed(false); }, [revision]);
 
   const shell = "max-h-[42%] shrink-0 overflow-auto border-t border-zinc-100 @xl:max-h-none @xl:w-72 @xl:border-l @xl:border-t-0 dark:border-zinc-800";
 
@@ -524,6 +531,45 @@ function Detail({ fileId, path, node, fileName, childCount, canPasteHere, onCopy
   const copyPath = async () => {
     try { await navigator.clipboard.writeText(path); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* clipboard blocked */ }
   };
+  // The API is usually on another origin, where <a download> is ignored, so fetch the bytes and save them from here.
+  const saveImage = async () => {
+    setBusy(true);
+    try {
+      const res = await fetch(api.pngUrl(fileId, path, revision));
+      if (!res.ok) throw new Error(`The image couldn't be read (${res.status}).`);
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = imageFileName(path);
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      ws.toast("error", e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
+  };
+  const replaceImage = async (image: File | undefined) => {
+    if (!image) return;
+    if (image.type && !image.type.startsWith("image/")) { ws.toast("error", `“${image.name}” isn't an image.`); return; }
+    setBusy(true);
+    try { await ws.setCanvasImage(fileId, path, image, quality); } finally { setBusy(false); }
+  };
+  const canReplace = node.type === "canvas" && !readOnly;
+  const dropProps = canReplace ? {
+    onDragOver: (e: DragEvent) => {
+      if (!e.dataTransfer.types.includes("Files")) return;
+      e.preventDefault(); e.stopPropagation();
+      e.dataTransfer.dropEffect = "copy";
+      setDropping(true);
+    },
+    onDragLeave: () => setDropping(false),
+    onDrop: (e: DragEvent) => {
+      if (!e.dataTransfer.types.includes("Files")) return;
+      e.preventDefault(); e.stopPropagation();
+      setDropping(false);
+      void replaceImage(e.dataTransfer.files[0]);
+    },
+  } : {};
+
   const act = "rounded-lg px-3 py-1.5 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-zinc-300 dark:hover:bg-zinc-800";
 
   return (
@@ -553,13 +599,14 @@ function Detail({ fileId, path, node, fileName, childCount, canPasteHere, onCopy
 
       {node.type === "canvas" && (
         <div className="space-y-3">
-          <div className="checker grid max-h-64 min-h-24 place-items-center overflow-auto rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
+          <div {...dropProps}
+            className={`checker grid max-h-64 min-h-24 place-items-center overflow-auto rounded-xl border p-4 transition ${dropping ? "border-accent-500 ring-2 ring-accent-500/30" : "border-zinc-200 dark:border-zinc-700"} ${busy ? "opacity-60" : ""}`}>
             {imgFailed ? (
               <p className="text-sm text-zinc-500">Couldn't render this image.</p>
             ) : (
               <img
-                key={`${fileId}/${path}`}
-                src={api.pngUrl(fileId, path)}
+                key={`${fileId}/${path}/${revision}`}
+                src={api.pngUrl(fileId, path, revision)}
                 alt={node.name}
                 draggable={false}
                 onError={() => setImgFailed(true)}
@@ -568,7 +615,7 @@ function Detail({ fileId, path, node, fileName, childCount, canPasteHere, onCopy
             )}
           </div>
           <div className="flex items-center justify-between gap-3">
-            <span className="text-xs text-zinc-500">{node.width} × {node.height} px</span>
+            <span className="text-xs text-zinc-500">{node.width} × {node.height} px{node.format ? ` · ${formatName(node.format)}` : ""}</span>
             <div className="flex gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
               {[1, 2, 4].map((z) => (
                 <button key={z} type="button" onClick={() => setZoom(z)}
@@ -578,6 +625,32 @@ function Detail({ fileId, path, node, fileName, childCount, canPasteHere, onCopy
               ))}
             </div>
           </div>
+          <div className="-mx-1 flex flex-wrap items-center gap-1">
+            <button type="button" className={`${act} inline-flex items-center gap-1.5`} onClick={saveImage} disabled={busy || imgFailed} title="Save this image as a PNG file">
+              <Download className="size-3.5" />Save PNG
+            </button>
+            {canReplace && (
+              <>
+                <button type="button" className={`${act} inline-flex items-center gap-1.5`} onClick={() => fileInput.current?.click()} disabled={busy}
+                  title="Replace this canvas' picture with an image file (or drop one on the preview). Its origin, delay and other children are kept; an _inlink/_outlink is removed.">
+                  <ArrowUp className="size-3.5" />Replace…
+                </button>
+                <select value={quality} disabled={busy} aria-label="Quality to store the uploaded image in"
+                  title={IMAGE_QUALITIES.find((o) => o.value === quality)?.hint}
+                  onChange={(e) => { setQuality(e.target.value); saveImageQuality(e.target.value); }}
+                  className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 text-xs text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">
+                  {IMAGE_QUALITIES.map((o) => (
+                    <option key={o.value} value={o.value} title={o.hint}>
+                      {o.value === "keep" && node.format ? `Same as current (${formatName(node.format)})` : o.label}
+                    </option>
+                  ))}
+                </select>
+                <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/bmp,image/gif" hidden
+                  onChange={(e) => { void replaceImage(e.target.files?.[0]); e.target.value = ""; }} />
+              </>
+            )}
+          </div>
+          {canReplace && <p className="text-[11px] leading-4 text-zinc-500">{IMAGE_QUALITIES.find((o) => o.value === quality)?.hint} Drop an image on the preview to replace it too.</p>}
         </div>
       )}
 
@@ -603,6 +676,14 @@ function Detail({ fileId, path, node, fileName, childCount, canPasteHere, onCopy
       </dl>
     </aside>
   );
+}
+
+/** "Mob/0100100.img/stand/0" -> "0100100_stand_0.png": the path inside the .img's parent folder, without ".img". */
+function imageFileName(path: string): string {
+  const parts = path.split("/");
+  const img = parts.findIndex((p) => /\.img$/i.test(p));
+  const name = (img >= 0 ? parts.slice(img) : parts.slice(-2)).map((p) => p.replace(/\.img$/i, "")).join("_");
+  return `${name.replace(/[\\:*?"<>|]/g, "_") || "canvas"}.png`;
 }
 
 /** Directories and images can't be renamed (MapleLib indexes them by name); everything below an image can. */
@@ -690,6 +771,7 @@ const OBJ_PATH = /\/obj\/\d+(\/[^/]+)?$/;
 /** Shows the sprite a map object refers to (`Obj/{oS}.img/{l0}/{l1}/{l2}`), or the link it is when it's a link. */
 function ObjPreview({ fileId, path }: { fileId: string; path: string }) {
   const { api } = useConnection();
+  const revision = useWorkspaceData().files[fileId]?.revision;
   const [state, setState] = useState<
     { status: "loading" } | { status: "none" } | { status: "error"; message: string } | { status: "ready"; ref: ObjRef }
   >({ status: "loading" });
@@ -725,7 +807,7 @@ function ObjPreview({ fileId, path }: { fileId: string; path: string }) {
     );
     else if (ref.node.type === "canvas") body = imgFailed ? failure("Couldn't render this image.") : (
       <div className={box}>
-        <img src={api.pngUrl(fileId, ref.path)} alt={ref.node.name} draggable={false} onError={() => setImgFailed(true)}
+        <img src={api.pngUrl(fileId, ref.path, revision)} alt={ref.node.name} draggable={false} onError={() => setImgFailed(true)}
           style={{ imageRendering: "pixelated", maxWidth: "none" }} />
       </div>
     );
@@ -752,6 +834,7 @@ function FrameAnimation({ fileId, path, minFrames = 2, fallback = null }: {
   fallback?: ReactNode;
 }) {
   const { api } = useConnection();
+  const revision = useWorkspaceData().files[fileId]?.revision;
   const [frames, setFrames] = useState<{ name: string; width: number; delay: number }[] | null>(null);
   const [empty, setEmpty] = useState(false);
   const [index, setIndex] = useState(0);
@@ -797,7 +880,7 @@ function FrameAnimation({ fileId, path, minFrames = 2, fallback = null }: {
     <div className="space-y-3">
       <div className="checker grid max-h-64 min-h-24 place-items-center overflow-auto rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
         <img
-          src={api.pngUrl(fileId, joinPath(path, cur.name))}
+          src={api.pngUrl(fileId, joinPath(path, cur.name), revision)}
           alt={`Frame ${cur.name}`}
           draggable={false}
           style={{ imageRendering: "pixelated", width: cur.width ? cur.width * zoom : undefined, maxWidth: "none" }}

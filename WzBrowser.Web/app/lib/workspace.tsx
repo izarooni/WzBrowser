@@ -98,6 +98,8 @@ interface Actions {
   deleteNode: (fileId: string, path: string, name: string) => Promise<void>;
   /** Renames a property and/or sets its value, then selects it at its (possibly new) path. False if it failed. */
   editNode: (fileId: string, path: string, edit: NodeEdit) => Promise<boolean>;
+  /** Replaces a canvas' picture with an image file. */
+  setCanvasImage: (fileId: string, path: string, image: Blob, quality?: string) => Promise<boolean>;
   save: (fileId: string) => Promise<void>;
   revert: (fileId: string) => Promise<void>;
   subscribe: (fileId: string, cb: (e: TreeEvent) => void) => () => void;
@@ -325,6 +327,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, [api, upsert, emit, toast]);
 
+  const setCanvasImage = useCallback<Actions["setCanvasImage"]>(async (fileId, path, image, quality) => {
+    try {
+      const r = await api.setPng(fileId, path, image, quality);
+      upsert(r.file);
+      emit(fileId, { reload: [parentPath(path), path], reveal: r.path });
+      return true;
+    } catch (e) {
+      toast("error", errText(e));
+      return false;
+    }
+  }, [api, upsert, emit, toast]);
+
   const save = useCallback(async (fileId: string) => {
     try {
       const r = await api.save(fileId);
@@ -362,9 +376,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setPan: (x, y) => dispatch({ type: "pan", x, y }),
     tidy: () => dispatch({ type: "tidy" }),
     openPicker: () => setPickerOpen(true),
-    paste, deleteNode, editNode, save, revert, subscribe, toast,
+    paste, deleteNode, editNode, setCanvasImage, save, revert, subscribe, toast,
     reveal, takePendingReveal, showWindow, followRef, edited, confirm,
-  }), [openFile, closeWindow, paste, deleteNode, editNode, save, revert, subscribe, toast, reveal, takePendingReveal, showWindow, followRef, edited, confirm]);
+  }), [openFile, closeWindow, paste, deleteNode, editNode, setCanvasImage, save, revert, subscribe, toast, reveal, takePendingReveal, showWindow, followRef, edited, confirm]);
 
   return (
     <ActionsCtx.Provider value={actions}>
