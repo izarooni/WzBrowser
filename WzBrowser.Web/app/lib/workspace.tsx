@@ -2,7 +2,7 @@ import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from "@headlessui/re
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { FilePicker } from "../components/file-picker";
 import { buttonPrimary, buttonSecondary } from "../components/ui";
-import type { LookupKind, NodeEdit, OpenedFile, WzNode } from "./api";
+import type { LookupKind, NodeCreate, NodeEdit, OpenedFile, WzNode } from "./api";
 import { useConnection } from "./connection";
 import { parentPath } from "./paths";
 
@@ -98,6 +98,8 @@ interface Actions {
   deleteNode: (fileId: string, path: string, name: string) => Promise<void>;
   /** Renames a property and/or sets its value, then selects it at its (possibly new) path. False if it failed. */
   editNode: (fileId: string, path: string, edit: NodeEdit) => Promise<boolean>;
+  /** Adds a property under `parent` and reveals it. Resolves false when the server refused it. */
+  createNode: (fileId: string, parent: string, create: NodeCreate) => Promise<boolean>;
   /** Replaces a canvas' picture with an image file. */
   setCanvasImage: (fileId: string, path: string, image: Blob, quality?: string) => Promise<boolean>;
   save: (fileId: string) => Promise<void>;
@@ -327,6 +329,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, [api, upsert, emit, toast]);
 
+  const createNode = useCallback<Actions["createNode"]>(async (fileId, parent, create) => {
+    try {
+      const r = await api.createNode(fileId, parent, create);
+      upsert(r.file);
+      emit(fileId, { reload: [parent], reveal: r.path });
+      return true;
+    } catch (e) {
+      toast("error", errText(e));
+      return false;
+    }
+  }, [api, upsert, emit, toast]);
+
   const setCanvasImage = useCallback<Actions["setCanvasImage"]>(async (fileId, path, image, quality) => {
     try {
       const r = await api.setPng(fileId, path, image, quality);
@@ -376,9 +390,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setPan: (x, y) => dispatch({ type: "pan", x, y }),
     tidy: () => dispatch({ type: "tidy" }),
     openPicker: () => setPickerOpen(true),
-    paste, deleteNode, editNode, setCanvasImage, save, revert, subscribe, toast,
+    paste, deleteNode, editNode, createNode, setCanvasImage, save, revert, subscribe, toast,
     reveal, takePendingReveal, showWindow, followRef, edited, confirm,
-  }), [openFile, closeWindow, paste, deleteNode, editNode, setCanvasImage, save, revert, subscribe, toast, reveal, takePendingReveal, showWindow, followRef, edited, confirm]);
+  }), [openFile, closeWindow, paste, deleteNode, editNode, createNode, setCanvasImage, save, revert, subscribe, toast, reveal, takePendingReveal, showWindow, followRef, edited, confirm]);
 
   return (
     <ActionsCtx.Provider value={actions}>

@@ -91,6 +91,8 @@ export interface SaveResult { path: string; size: number; file: OpenedFile }
 
 /** `name`/`value` left out stay as they are. `value` is written the way `WzNode.value` shows it (a vector as "x, y"). */
 export interface NodeEdit { name?: string; value?: string }
+/** A property to add; `value` is left out for the types that hold none (sub, null). */
+export interface NodeCreate { name: string; type: string; value?: string }
 /** `path` is where the property is now, which changes on a rename. */
 export interface NodeEditResult { path: string; node: WzNode; file: OpenedFile }
 
@@ -316,6 +318,12 @@ export function createApi(base: string) {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path, ...edit }),
+      }),
+    createNode: (id: string, parent: string, create: NodeCreate) =>
+      request<NodeEditResult>(`/api/files/${id}/node`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: parent, ...create }),
       }),
     save: (id: string) =>
       request<SaveResult>(`/api/files/${id}/save`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }),

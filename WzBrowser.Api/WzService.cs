@@ -33,6 +33,10 @@ public record SaveResult(string Path, long Size, OpenedFileDto File);
 public record NodeEditRequest(string Path, string? Name, string? Value);
 /// <param name="Path">Where the property is now (differs from the request's after a rename).</param>
 public record NodeEditResult(string Path, NodeDto Node, OpenedFileDto File);
+/// <param name="Path">The image or property to add the new property to.</param>
+/// <param name="Type">int, short, long, float, double, string, vector, uol, sub or null.</param>
+/// <param name="Value">Required for the types that hold a value, in the form <see cref="NodeDto.Value"/> shows it.</param>
+public record NodeCreateRequest(string Path, string Name, string Type, string? Value);
 
 /// <param name="Name">Path relative to the library folder, e.g. "Quest/QuestData/QuestData_000.wz".</param>
 /// <param name="Kind">Set when the list was narrowed to browsable files: "quest" or "etc" (see <see cref="OpenedFileDto"/>).</param>
@@ -516,6 +520,48 @@ public sealed partial class WzService(string? root = null)
             Touch(entry);
             var parent = path.Contains('/') ? path[..path.LastIndexOf('/')] : "";
             return new NodeEditResult(Join(parent, prop.Name), Describe(prop), Describe(id, entry));
+        }
+    }
+
+    /// <summary>
+    /// Adds a new property to an image or property. The name must be free and, for the types that hold one, the value
+    /// must parse; both are checked before anything is added.
+    /// </summary>
+    public NodeEditResult CreateNode(string id, NodeCreateRequest req)
+    {
+        var entry = Get(id);
+        lock (entry.Lock)
+        {
+            var path = Normalize(req.Path);
+            if (Resolve(entry.File, path) is not IPropertyContainer parent)
+                throw new InvalidDataException("Properties can only be added to an image or a property that holds others.");
+
+            var name = req.Name?.Trim() ?? "";
+            if (name.Length == 0) throw new ArgumentException("A name is required.");
+            if (name.Contains('/')) throw new ArgumentException("A name can't contain '/'.");
+            if (parent[name] is { } other) throw new InvalidDataException($"'{other.Name}' already exists here.");
+
+            var type = req.Type?.Trim().ToLowerInvariant() ?? "";
+            WzImageProperty prop = type switch
+            {
+                "vector" => new WzVectorProperty(name, 0, 0),
+                "uol" => new WzUOLProperty(name, ""),
+                "sub" => new WzSubProperty(name),
+                "null" => new WzNullProperty(name),
+                _ => NewValueProperty(name, type),
+            };
+            if (type is not ("sub" or "null"))
+            {
+                if (string.IsNullOrWhiteSpace(req.Value)) throw new ArgumentException($"A {type} property needs a value.");
+                SetValue(prop, req.Value);
+            }
+            if (parent is WzConvexProperty && prop is not WzExtended)
+                throw new InvalidDataException($"A convex property can't hold a {type}; add a vector, link or sub-property instead.");
+
+            parent.AddProperty(prop);
+            MarkChanged(parent);
+            Touch(entry);
+            return new NodeEditResult(Join(path, prop.Name), Describe(prop), Describe(id, entry));
         }
     }
 

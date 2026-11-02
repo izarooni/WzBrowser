@@ -8,6 +8,7 @@ import { EDITABLE, invalid } from "../lib/values";
 import { IMAGE_QUALITIES, formatName, loadImageQuality, saveImageQuality } from "../lib/image-quality";
 import { download } from "../lib/download";
 import { ContextMenu, type MenuItem } from "./context-menu";
+import { NewPropertyDialog } from "./new-property-dialog";
 import { inputClass } from "./ui";
 
 type Level =
@@ -57,6 +58,8 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
   /** The right-click menu: where it opened and on which node ("" for the empty space, i.e. the file itself). */
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
+  /** The image or property the "New property" dialog adds to, while it's open. */
+  const [creating, setCreating] = useState<string | null>(null);
 
   const rowRefs = useRef(new Map<string, HTMLElement>());
   const revealRef = useRef<string | null>(null);
@@ -315,6 +318,12 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
     catch (e) { ws.toast("error", e instanceof Error ? e.message : String(e)); }
   };
 
+  /** Where a new property goes from `path`: the node itself if it can hold properties, else its parent. */
+  const createTarget = (path: string): string | null => {
+    for (const p of path ? [path, parentPath(path)] : [""]) if (PROPERTY_HOLDERS.has(typeAt(p).type)) return p;
+    return null;
+  };
+
   const menuItems = (path: string): MenuItem[] => {
     const node = typeAt(path);
     const items: MenuItem[] = [];
@@ -326,6 +335,8 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
       const target = pasteTarget(clipboard, path)!;
       items.push({ label: `Paste “${clipboard.name}”${target !== path ? ` into ${target ? `“${baseName(target)}”` : "the file"}` : ""}`, shortcut: "Ctrl+V", onSelect: () => pasteHere(path) });
     }
+    const into = readOnly ? null : createTarget(path);
+    if (into != null) items.push({ label: `New property${into !== path ? ` in “${baseName(into)}”` : ""}…`, onSelect: () => { setCreating(into); expand(into); } });
     if (path) items.push({ label: "Copy path", onSelect: () => void navigator.clipboard.writeText(path).catch(() => ws.toast("error", "The clipboard is blocked.")) });
 
     const saves: MenuItem[] = [];
@@ -535,6 +546,14 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
       />
     </div>
     {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.path)} onClose={closeMenu} />}
+    <NewPropertyDialog
+      open={creating != null}
+      parentName={creating ?? ""}
+      parentType={creating != null ? typeAt(creating).type : ""}
+      siblings={creating != null && levels[creating]?.status === "ready" ? (levels[creating] as { nodes: WzNode[] }).nodes.map((n) => n.name) : null}
+      onSubmit={(create) => ws.createNode(fileId, creating ?? "", create)}
+      onClose={() => setCreating(null)}
+    />
     </div>
   );
 });
@@ -732,6 +751,9 @@ function imageFileName(path: string): string {
   const name = (img >= 0 ? parts.slice(img) : parts.slice(-2)).map((p) => p.replace(/\.img$/i, "")).join("_");
   return `${name.replace(/[\\:*?"<>|]/g, "_") || "canvas"}.png`;
 }
+
+/** Nodes a property can be added to. */
+const PROPERTY_HOLDERS = new Set(["image", "sub", "convex", "canvas"]);
 
 /** Directories and images can't be renamed (MapleLib indexes them by name); everything below an image can. */
 const NOT_PROPERTY = new Set(["file", "directory", "image"]);
