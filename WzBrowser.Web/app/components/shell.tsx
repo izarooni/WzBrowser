@@ -5,6 +5,7 @@ import { DEFAULT_API_BASE } from "../lib/api";
 import { useConnection, type ConnectionStatus } from "../lib/connection";
 import { useActions, useWorkspaceData } from "../lib/workspace";
 import { Moon, Sliders, Sun, XMark } from "./icons";
+import { XmlExportDialog } from "./xml-export-dialog";
 import { buttonPrimary, buttonSecondary, inputClass } from "./ui";
 
 const THEME_KEY = "wzbrowser.theme";
@@ -151,6 +152,7 @@ function ClipboardChip() {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [xmlOpen, setXmlOpen] = useState(false);
   const { status, readOnly, browseOnly } = useConnection();
   const { openPicker } = useActions();
 
@@ -171,6 +173,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             {/* Browse-only viewers see every file as a tab, so there's nothing to open or copy. */}
             {!browseOnly && <ClipboardChip />}
             {!browseOnly && <button type="button" className={`${buttonPrimary} !py-2`} disabled={status !== "online"} onClick={openPicker}>Open file…</button>}
+            {/* Converting writes to the server's disk, which only its own computer may do. */}
+            {!readOnly && <button type="button" className={`${buttonSecondary} !py-2`} disabled={status !== "online"} onClick={() => setXmlOpen(true)}>Convert to XML…</button>}
             <StatusPill onClick={() => setSettingsOpen(true)} />
             <button
               type="button"
@@ -188,6 +192,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main className="relative min-h-0 flex-1">{children}</main>
 
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <XmlExportDialog open={xmlOpen} onClose={() => setXmlOpen(false)} />
     </div>
   );
 }

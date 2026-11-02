@@ -149,6 +149,11 @@ export interface NpcQuest { id: number; name: string; archive: string; starts: b
 /** An NPC that at least one quest in the library starts or ends at. */
 export interface NpcQuests { id: number; name: string | null; quests: NpcQuest[] }
 
+/** One file of an XML conversion. `total` is its image count, known once it's open; `folder` is e.g. "Mob.wz". */
+export interface XmlExportFile { name: string; folder: string; images: number; total: number; state: "waiting" | "running" | "done" | "failed" | "cancelled"; error: string | null }
+/** A conversion running on the server. `failed`: it finished, but at least one file couldn't be converted. */
+export interface XmlExportJob { id: string; state: "running" | "done" | "failed" | "cancelled"; output: string; files: XmlExportFile[] }
+
 export const ENCRYPTIONS =["Auto", "GMS", "EMS", "BMS", "CLASSIC", "GETFROMZLZ"] as const;
 
 /**
@@ -346,6 +351,15 @@ export function createApi(base: string) {
     /** For a placed map object (`.../obj/N` or one of its children), the sprite it refers to in `Obj/`. */
     /** Undefined when the node isn't a map object; throws when it is but the sprite can't be found. */
     objRef: (id: string, path: string) => request<ObjRef | undefined>(`/api/files/${id}/objref?path=${q(path)}`),
+    /** Starts converting .wz files to server XML under `output` ({output}/Mob.wz/0100100.img.xml); poll `xmlExport`. */
+    startXmlExport: (paths: string[], output: string, encryption: string) =>
+      request<XmlExportJob>("/api/xml-export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paths, output, encryption }),
+      }),
+    xmlExport: (id: string) => request<XmlExportJob>(`/api/xml-export/${id}`),
+    cancelXmlExport: (id: string) => request<XmlExportJob>(`/api/xml-export/${id}`, { method: "DELETE" }),
     soundUrl: (id: string, path: string) => `${base}/api/files/${id}/sound?path=${q(path)}`,
   };
 }

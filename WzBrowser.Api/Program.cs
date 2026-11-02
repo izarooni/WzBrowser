@@ -233,6 +233,10 @@ api.MapGet("/files/{id}/sound", (string id, string path, WzService wz) =>
     var s = wz.Sound(id, path);
     return Results.File(s.Bytes, s.ContentType, enableRangeProcessing: true);
 });
+// ---- converting .wz files to server XML ({Output}/Mob.wz/0100100.img.xml), in the background ----
+api.MapPost("/xml-export", (XmlExportRequest req, WzService wz) => wz.StartXmlExport(req));
+api.MapGet("/xml-export/{id}", (string id, WzService wz) => wz.XmlExportStatus(id));
+api.MapDelete("/xml-export/{id}", (string id, WzService wz) => wz.CancelXmlExport(id));
 api.MapFallback(() => Results.NotFound(new { error = "Unknown API route." }));
 
 app.MapGet("/",() => Results.Text($"WzBrowser API listening on http://{host}:{port}\nOpen the WzBrowser web app and point it at this address.\n", "text/plain"));
