@@ -323,6 +323,8 @@ export function createApi(base: string) {
     /** `revision` (the file's) makes the address change after an edit, so the browser doesn't show a cached picture. */
     pngUrl: (id: string, path: string, revision?: number) =>
       `${base}/api/files/${id}/png?path=${q(path)}${revision != null ? `&v=${revision}` : ""}`,
+    /** Every canvas under a node (folder, .img or property; the whole file for ""), as PNGs in a zip laid out like the tree. */
+    pngsUrl: (id: string, path: string) => `${base}/api/files/${id}/pngs?path=${q(path)}`,
     /**
      * Replaces a canvas' picture with this image file (PNG, JPEG, BMP or GIF), stored as `quality` (an IMAGE_QUALITIES
      * value; lossless when left out). Removes any _inlink/_outlink.

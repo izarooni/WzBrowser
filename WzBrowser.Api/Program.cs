@@ -99,7 +99,7 @@ app.Use(async (ctx, next) =>
 // A library viewed from another computer shows only the quest and Commodity views: no raw tree, node values, images
 // or sounds, and no links into other files (they open in the raw tree). Name lookups and link previews stay.
 bool BrowseOnly(HttpContext ctx) => wzService.Root != null && IsRemote(ctx);
-var rawRoutes = new System.Text.RegularExpressions.Regex(@"^/api/files/[^/]+/(children|search|node|png|sound|objref|ref/open)/?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+var rawRoutes = new System.Text.RegularExpressions.Regex(@"^/api/files/[^/]+/(children|search|node|png|pngs|sound|objref|ref/open)/?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 app.Use(async (ctx, next) =>
 {
     if (BrowseOnly(ctx) && rawRoutes.IsMatch(ctx.Request.Path.Value ?? ""))
@@ -208,6 +208,12 @@ api.MapGet("/files/{id}/preview", (string id, string kind, int refId, HttpContex
 });
 api.MapGet("/files/{id}/png", (string id, string path, WzService wz) =>
     Results.File(wz.Png(id, path), "image/png"));
+// Every canvas under a node (a folder, .img or property), as PNGs in a zip laid out like the tree.
+api.MapGet("/files/{id}/pngs", (string id, string? path, WzService wz) =>
+{
+    var (zip, name) = wz.ExportPngs(id, path);
+    return Results.File(zip, "application/zip", name);
+});
 // Replaces a canvas' picture; the request body is the image file itself (PNG, JPEG, BMP or GIF).
 // `quality`: the pixel format to store: bgra8888 (lossless, the default), argb4444, argb1555, rgb565, dxt3, dxt5
 // (Big Bang+ clients only), or keep. What each loses is documented at the top of WzService.CanvasUpload.cs.

@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import type { ObjRef, WzNode } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { baseName, canPaste, joinPath, parentPath } from "../lib/paths";
@@ -6,6 +6,8 @@ import { dnd, useActions, useWorkspaceData, type ClipItem, type TreeEvent } from
 import { ArrowUp, ChevronRight, Copy, Document, Download, ExclamationTriangle, Folder, Music, Photo, Search, XMark } from "./icons";
 import { EDITABLE, invalid } from "../lib/values";
 import { IMAGE_QUALITIES, formatName, loadImageQuality, saveImageQuality } from "../lib/image-quality";
+import { download } from "../lib/download";
+import { ContextMenu, type MenuItem } from "./context-menu";
 import { inputClass } from "./ui";
 
 type Level =
@@ -40,8 +42,8 @@ function TypeIcon({ type }: { type: string }) {
 const isEditable = (t: EventTarget | null) => t instanceof HTMLElement && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
 
 export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
-  const { api, status } = useConnection();
-    const ws = useActions();
+  const { api, status, readOnly } = useConnection();
+  const ws = useActions();
   const { files, clipboard } = useWorkspaceData();
   const file = files[fileId];
 
@@ -52,6 +54,9 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
   const [hits, setHits] = useState<{ needle: string; paths: Set<string>; ancestors: Set<string> } | null>(null);
   const [dropPath, setDropPath] = useState<string | null>(null);
   const [revealTick, setRevealTick] = useState(0);
+  /** The right-click menu: where it opened and on which node ("" for the empty space, i.e. the file itself). */
+  const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
 
   const rowRefs = useRef(new Map<string, HTMLElement>());
   const revealRef = useRef<string | null>(null);
@@ -272,27 +277,74 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
     return { fileId, path, name: n.name, type: n.type, cut };
   };
 
-  const copySelected = (cut: boolean) => {
-    if (selected == null) return;
-    ws.setClipboard(clipOf(selected, cut));
-    ws.toast("info", `${cut ? "Cut" : "Copied"} “${baseName(selected)}”. Click into another window and press Ctrl+V.`);
+  const copyNode = (path: string | null, cut: boolean) => {
+    if (path == null) return;
+    ws.setClipboard(clipOf(path, cut));
+    ws.toast("info", `${cut ? "Cut" : "Copied"} “${baseName(path)}”. Click into another window and press Ctrl+V.`);
   };
+  const copySelected = (cut: boolean) => copyNode(selected, cut);
 
-  /** Where Ctrl+V lands: the selected node if it can hold the clipboard, else its parent, else the file root. */
-  const pasteTarget = (clip: ClipItem): string | null => {
-    const candidates = selected != null ? [selected, parentPath(selected), ""] : [""];
+  /** Where Ctrl+V lands: `from` (the selected node) if it can hold the clipboard, else its parent, else the file root. */
+  const pasteTarget = (clip: ClipItem, from: string | null = selected): string | null => {
+    const candidates = from ? [from, parentPath(from), ""] : [""];
     for (const p of candidates) if (canPaste(clip, typeAt(p))) return p;
     return null;
   };
 
-  const pasteHere = () => {
+  const pasteHere = (from: string | null = selected) => {
     const clip = clipboard;
     if (!clip) return ws.toast("info", "Nothing copied yet. Select a node and press Ctrl+C.");
-    const target = pasteTarget(clip);
+    const target = pasteTarget(clip, from);
     if (target == null) return ws.toast("error", `A ${clip.type} can't be pasted here. Select an image or sub-property to paste properties into.`);
     if (clip.cut && clip.fileId === fileId && (target === clip.path || target.startsWith(clip.path + "/")))
       return ws.toast("error", "A node can't be moved into itself.");
     void ws.paste(fileId, target, clip, clip.cut);
+  };
+
+  // ------------------------------------------------------------ right-click menu
+
+  const exportImages = async (path: string) => {
+    const name = path ? baseName(path) : file?.name ?? "file";
+    ws.toast("info", `Exporting the images in “${name}”…`);
+    try { await download(api.pngsUrl(fileId, path), `${name.replace(/\.(img|wz)$/i, "").replace(/[\\/:*?"<>|]/g, "_") || "images"}.zip`); }
+    catch (e) { ws.toast("error", `Couldn't export the images in “${name}”: ${e instanceof Error ? e.message : String(e)}`); }
+  };
+
+  const saveCanvas = async (path: string) => {
+    try { await download(api.pngUrl(fileId, path, file?.revision), imageFileName(path)); }
+    catch (e) { ws.toast("error", e instanceof Error ? e.message : String(e)); }
+  };
+
+  const menuItems = (path: string): MenuItem[] => {
+    const node = typeAt(path);
+    const items: MenuItem[] = [];
+    if (path) {
+      items.push({ label: "Copy", icon: <Copy className="size-4" />, shortcut: "Ctrl+C", onSelect: () => copyNode(path, false) });
+      if (!readOnly) items.push({ label: "Cut", shortcut: "Ctrl+X", onSelect: () => copyNode(path, true) });
+    }
+    if (!readOnly && clipboard && pasteTarget(clipboard, path) != null) {
+      const target = pasteTarget(clipboard, path)!;
+      items.push({ label: `Paste “${clipboard.name}”${target !== path ? ` into ${target ? `“${baseName(target)}”` : "the file"}` : ""}`, shortcut: "Ctrl+V", onSelect: () => pasteHere(path) });
+    }
+    if (path) items.push({ label: "Copy path", onSelect: () => void navigator.clipboard.writeText(path).catch(() => ws.toast("error", "The clipboard is blocked.")) });
+
+    const saves: MenuItem[] = [];
+    if (node.type === "canvas") saves.push({ label: "Save PNG", icon: <Download className="size-4" />, onSelect: () => void saveCanvas(path) });
+    if (node.hasChildren && node.type !== "canvas") saves.push({ label: "Export all images", icon: <Photo className="size-4" />, onSelect: () => void exportImages(path) });
+    if (saves.length) items.push(...(items.length ? [{ kind: "separator" } as const] : []), ...saves);
+
+    if (path && !readOnly) items.push({ kind: "separator" }, { label: "Delete", danger: true, shortcut: "Del", onSelect: () => void ws.deleteNode(fileId, path, baseName(path)) });
+    return items;
+  };
+
+  const openMenu = (e: MouseEvent<HTMLElement>, path: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (path) setSelected(path);
+    // The menu key and Shift+F10 open it with no pointer position: put it under the row instead.
+    const r = e.currentTarget.getBoundingClientRect();
+    const keyboard = e.clientX === 0 && e.clientY === 0;
+    setMenu({ x: keyboard ? r.left + 24 : e.clientX, y: keyboard ? (path ? r.bottom : r.top + 8) : e.clientY, path });
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -403,6 +455,7 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
           aria-label={`${file?.name ?? "WZ"} contents`}
           tabIndex={0}
           onKeyDown={onKeyDown}
+          onContextMenu={(e) => openMenu(e, "")}
           onDragOver={(e) => dragOverTarget(e, "", ROOT)}
           onDrop={(e) => dropOnTarget(e, "", ROOT)}
           onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { setDropPath(null); endHover(); } }}
@@ -432,6 +485,7 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
                 draggable
                 tabIndex={isSelected || (selected == null && path === nodeRows[0]?.path) ? 0 : -1}
                 onClick={() => onRowClick(path, node)}
+                onContextMenu={(e) => openMenu(e, path)}
                 onDragStart={(e) => {
                   const item: ClipItem = { fileId, path, name: node.name, type: node.type, cut: false };
                   dnd.current = item;
@@ -476,10 +530,11 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
         canPasteHere={!!clipboard && pasteTarget(clipboard) != null}
         onCopy={() => copySelected(false)}
         onCut={() => copySelected(true)}
-        onPaste={pasteHere}
+        onPaste={() => pasteHere()}
         onDelete={() => selected != null && void ws.deleteNode(fileId, selected, baseName(selected))}
       />
     </div>
+    {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.path)} onClose={closeMenu} />}
     </div>
   );
 });
@@ -531,18 +586,10 @@ function Detail({ fileId, path, node, fileName, childCount, canPasteHere, onCopy
   const copyPath = async () => {
     try { await navigator.clipboard.writeText(path); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* clipboard blocked */ }
   };
-  // The API is usually on another origin, where <a download> is ignored, so fetch the bytes and save them from here.
   const saveImage = async () => {
     setBusy(true);
     try {
-      const res = await fetch(api.pngUrl(fileId, path, revision));
-      if (!res.ok) throw new Error(`The image couldn't be read (${res.status}).`);
-      const url = URL.createObjectURL(await res.blob());
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = imageFileName(path);
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      await download(api.pngUrl(fileId, path, revision), imageFileName(path));
     } catch (e) {
       ws.toast("error", e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
