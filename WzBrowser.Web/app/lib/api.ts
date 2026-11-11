@@ -66,8 +66,11 @@ export interface CommodityColumn { name: string; type: NodeType }
 export interface CommodityTable { columns: CommodityColumn[]; rows: CommodityRow[] }
 /** After an edit: the (possibly grown) column list, the entry as it is now, and the file (now unsaved). */
 export interface CommodityRowResult { columns: CommodityColumn[]; row: CommodityRow; file: OpenedFile }
-/** After setting values: each edited entry once, as it is now. */
-export interface CommodityRowsResult { columns: CommodityColumn[]; rows: CommodityRow[]; file: OpenedFile }
+/** After setting values: each edited entry once, as it is now. `renumbered`: an SN edit moved entries between tabs and
+ * other entries were renamed, so reload the table. `packageRefs`: package contents switched to the edited entries' new SNs. */
+export interface CommodityRowsResult { columns: CommodityColumn[]; rows: CommodityRow[]; file: OpenedFile; renumbered: boolean; packageRefs: number }
+/** `packageRefs`: package contents (CashPackage.img) removed with the entries. */
+export interface CommodityDeleteResult { file: OpenedFile; deleted: number; packageRefs: number }
 export interface CommoditySet { entry: string; property: string; type: string; value: string }
 
 /** One Category.img entry: a Cash Shop sub tab. `entry` is the numbered property that holds it. */
@@ -75,8 +78,8 @@ export interface CategorySub { entry: string; sub: number; name: string }
 /** A top Cash Shop tab (fixed by the client) and its sub tabs, in CategorySub order. */
 export interface CategoryGroup { category: number; subs: CategorySub[] }
 export interface CategoryTable { categories: CategoryGroup[] }
-/** `deletedCommodity`: Commodity.img entries removed along with deleted sub tabs. */
-export interface CategoryResult { table: CategoryTable; file: OpenedFile; deletedCommodity: number }
+/** `deletedCommodity`: Commodity.img entries removed along with deleted sub tabs; `packageRefs`: package contents removed with them. */
+export interface CategoryResult { table: CategoryTable; file: OpenedFile; deletedCommodity: number; packageRefs: number }
 
 export type LookupKind = "npc" | "item" | "mob" | "map" | "skill" | "quest";
 
@@ -297,9 +300,10 @@ export function createApi(base: string) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       }),
-    /** Removes these Commodity.img entries; all must exist, or nothing is removed. */
+    /** Removes these Commodity.img entries (and their SNs from every package), renumbering the rest; all must exist,
+     * or nothing is removed. */
     deleteCommodity: (id: string, entries: string[]) =>
-      request<OpenedFile>(`/api/files/${id}/commodity/delete`, {
+      request<CommodityDeleteResult>(`/api/files/${id}/commodity/delete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(entries),

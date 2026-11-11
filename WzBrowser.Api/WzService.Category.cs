@@ -9,7 +9,8 @@ public record CategorySubDto(string Entry, int Sub, string Name);
 public record CategoryGroupDto(int Category, List<CategorySubDto> Subs);
 public record CategoryTable(List<CategoryGroupDto> Categories);
 /// <param name="DeletedCommodity">Commodity.img entries removed along with deleted sub tabs.</param>
-public record CategoryResult(CategoryTable Table, OpenedFileDto File, int DeletedCommodity = 0);
+/// <param name="PackageRefs">Package contents (CashPackage.img) removed with those entries.</param>
+public record CategoryResult(CategoryTable Table, OpenedFileDto File, int DeletedCommodity = 0, int PackageRefs = 0);
 
 public record CategoryAddRequest(int Category, string Name);
 public record CategoryRenameRequest(string Entry, string Name);
@@ -127,16 +128,16 @@ public sealed partial class WzService
             var remaining = img.WzProperties.Except(props).Select(TabOf).ToHashSet();
             var gone = props.Select(TabOf).Where(t => t != null && !remaining.Contains(t)).ToHashSet();
 
-            var commodity = gone.Count == 0 ? [] : CommodityImage(entry).WzProperties
-                .Where(p => FindProp(p, "SN") is { } sn && int.TryParse(Describe(sn).Value, out var v) && SnTab(v) is { } t && gone.Contains(t))
+            var commodityImg = gone.Count == 0 ? null : CommodityImage(entry);
+            var commodity = commodityImg == null ? [] : commodityImg.WzProperties
+                .Where(p => SnOfEntry(p) is { } v && SnTab(v) is { } t && gone.Contains(t))
                 .ToList();
-            foreach (var p in commodity) p.Remove();
-            if (commodity.Count > 0) MarkChanged(CommodityImage(entry));
+            var packageRefs = commodity.Count > 0 ? RemoveCommodityEntries(entry, commodityImg!, commodity) : 0;
 
             foreach (var p in props) p.Remove();
             RenumberCategories(img);
             Touch(entry);
-            return new CategoryResult(CategoryTableOf(img), Describe(id, entry), commodity.Count);
+            return new CategoryResult(CategoryTableOf(img), Describe(id, entry), commodity.Count, packageRefs);
         }
     }
 

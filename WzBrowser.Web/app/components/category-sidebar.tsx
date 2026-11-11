@@ -6,6 +6,7 @@ import { Pencil, Plus, XMark } from "./icons";
 
 const IMG = "Category.img";
 const COMMODITY_IMG = "Commodity.img";
+const PACKAGE_IMG = "CashPackage.img";
 
 /** The Cash Shop tab the client files an SN under: Category * 10000000 + CategorySub * 100000 + n. */
 export function snTab(sn: number) {
@@ -98,13 +99,17 @@ export const CategorySidebar = memo(function CategorySidebar({ fileId, revision,
     const n = count(tabKey(category, sub.sub)) ?? 0;
     const ok = await actions.confirm({
       title: `Delete "${sub.name}"?`,
-      body: `${n > 0 ? `Its ${n.toLocaleString()} Commodity ${n === 1 ? "entry (SN" : "entries (SNs"} ${category * 100 + sub.sub}xxxxx) ${n === 1 ? "is" : "are"} deleted too: the client won't open the Cash Shop with an SN whose tab is missing. ` : ""}The remaining sub categories are renumbered so the client still reads them all. This changes the open file in memory only. Nothing on disk changes until you save, and you can discard all edits with Revert.`,
+      body: `${n > 0 ? `Its ${n.toLocaleString()} Commodity ${n === 1 ? "entry (SN" : "entries (SNs"} ${category * 100 + sub.sub}xxxxx) ${n === 1 ? "is" : "are"} deleted too, along with their SNs in any package: the client won't open the Cash Shop with an SN whose tab is missing. ` : ""}The remaining sub categories are renumbered so the client still reads them all. This changes the open file in memory only. Nothing on disk changes until you save, and you can discard all edits with Revert.`,
       confirmLabel: "Delete",
       danger: true,
     });
     if (!ok) return;
-    await run(() => api.deleteCategorySubs(fileId, [sub.entry]), [IMG, COMMODITY_IMG], (r) => {
-      actions.toast("success", `Deleted "${sub.name}"${r.deletedCommodity ? ` and its ${r.deletedCommodity.toLocaleString()} Commodity ${r.deletedCommodity === 1 ? "entry" : "entries"}` : ""}.`);
+    await run(() => api.deleteCategorySubs(fileId, [sub.entry]), [IMG, COMMODITY_IMG, PACKAGE_IMG], (r) => {
+      const parts = [
+        ...(r.deletedCommodity ? [`${r.deletedCommodity.toLocaleString()} Commodity ${r.deletedCommodity === 1 ? "entry" : "entries"}`] : []),
+        ...(r.packageRefs ? [`${r.packageRefs.toLocaleString()} package ${r.packageRefs === 1 ? "content" : "contents"}`] : []),
+      ];
+      actions.toast("success", `Deleted "${sub.name}"${parts.length ? ` with ${parts.join(" and ")}` : ""}.`);
       if (selected && selected !== "other" && selected.category === category && selected.sub === sub.sub) onSelect({ category });
     });
   };

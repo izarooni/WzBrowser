@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import type { CategoryTable, CommodityCell, CommodityColumn, CommodityRow, CommodityRowsResult, CommodityTable } from "../lib/api";
+import type { CategoryTable, CommodityCell, CommodityColumn, CommodityRow, CommodityRowsResult, CommodityTable, OpenedFile } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { useNames } from "../lib/use-names";
 import { EDITABLE, INTEGER, invalid } from "../lib/values";
@@ -12,6 +12,7 @@ import { buttonPrimary, inputClass } from "./ui";
 const ROW_H = 40;
 const OVERSCAN = 8;
 const IMG = "Commodity.img";
+const PACKAGE_IMG = "CashPackage.img";
 
 /** Stands for the row-selection checkbox column wherever a column index is expected. */
 const SELECT = -1;
@@ -217,6 +218,20 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
 
   // ------------------------------------------------------------ editing
 
+  /**
+   * Refetches the whole table, for edits after which the server renumbered entries (adding, deleting, moving an SN to
+   * another tab): rows can't be matched by name any more. Returns the rows in file order.
+   */
+  const reload = async (file: OpenedFile, nodes: string[]) => {
+    ownRevisions.current.add(file.revision);
+    actions.edited(file, nodes);
+    const t = await api.commodity(fileId);
+    const columns = keepOrder(table?.columns, t.columns);
+    const rows = t.rows.map((r) => remap(r, t.columns, columns));
+    setTable({ columns, rows });
+    return rows;
+  };
+
   /** Merges an edit's result into the table, in the column order already on screen. New entries are appended. */
   const apply = (r: CommodityRowsResult, reload: string[]) => {
     ownRevisions.current.add(r.file.revision);
@@ -242,8 +257,15 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
     const tags = rows.map((row) => `${row.name}/${col}`);
     setPending((p) => new Set([...p, ...tags]));
     try {
-      apply(await api.setCommodity(fileId, sets), rows.map((row) => `${IMG}/${row.name}`));
-      if (rows.length > 1) actions.toast("success", `Set ${column.name} to ${value} on ${rows.length.toLocaleString()} entries.`);
+      const r = await api.setCommodity(fileId, sets);
+      if (r.renumbered) await reload(r.file, [IMG, PACKAGE_IMG]);
+      else apply(r, [...rows.map((row) => `${IMG}/${row.name}`), ...(r.packageRefs ? [PACKAGE_IMG] : [])]);
+      const notes = [
+        ...(r.renumbered ? ["entries renumbered to keep each Cash Shop tab together"] : []),
+        ...(r.packageRefs ? [`${r.packageRefs.toLocaleString()} package ${r.packageRefs === 1 ? "content" : "contents"} moved to the new SN`] : []),
+      ];
+      if (rows.length > 1 || notes.length)
+        actions.toast("success", `Set ${column.name} to ${value}${rows.length > 1 ? ` on ${rows.length.toLocaleString()} entries` : ""}${notes.length ? `; ${notes.join(", ")}` : ""}.`);
     } catch (e) {
       actions.toast("error", e instanceof Error ? e.message : String(e));
     } finally {
@@ -315,29 +337,31 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
 
   const visibleSelected = visible.reduce((n, r) => n + (selected.has(r.name) ? 1 : 0), 0);
 
-  const deleteSelected = async () => {
-    const names = [...selected];
+  /**
+   * Deletes entries after asking. The server renumbers the rest (the client reads "0".."N-1") and takes their SNs out
+   * of every package, so the table is reloaded afterwards.
+   */
+  const deleteEntries = async (names: string[], hidden = 0) => {
     if (names.length === 0) return;
-    const hidden = names.length - visibleSelected;
+    const what = names.length === 1 ? `entry ${names[0]}` : `${names.length.toLocaleString()} entries`;
     const ok = await actions.confirm({
-      title: `Delete ${names.length.toLocaleString()} ${names.length === 1 ? "entry" : "entries"}?`,
-      body: `${hidden > 0 ? `${hidden.toLocaleString()} of them ${hidden === 1 ? "is" : "are"} hidden by the search. ` : ""}They are removed from the open file in memory only. Nothing on disk changes until you save, and you can discard all edits with Revert.`,
+      title: `Delete ${what}?`,
+      body: `${hidden > 0 ? `${hidden.toLocaleString()} of them ${hidden === 1 ? "is" : "are"} hidden by the search. ` : ""}Their SNs are also removed from any package in ${PACKAGE_IMG} (a package left empty stays), and the remaining entries are renumbered so the client still reads them all. This changes the open file in memory only. Nothing on disk changes until you save, and you can discard all edits with Revert.`,
       confirmLabel: "Delete",
       danger: true,
     });
     if (!ok) return;
     try {
-      const file = await api.deleteCommodity(fileId, names);
-      ownRevisions.current.add(file.revision);
-      const gone = new Set(names);
-      setTable((t) => (t ? { ...t, rows: t.rows.filter((r) => !gone.has(r.name)) } : t));
+      const r = await api.deleteCommodity(fileId, names);
       setSelected(new Set());
-      actions.edited(file, [IMG]);
-      actions.toast("success", `Deleted ${names.length.toLocaleString()} ${names.length === 1 ? "entry" : "entries"}.`);
+      await reload(r.file, [IMG, PACKAGE_IMG]);
+      actions.toast("success", `Deleted ${r.deleted === 1 ? "1 entry" : `${r.deleted.toLocaleString()} entries`}${r.packageRefs ? ` and ${r.packageRefs.toLocaleString()} package ${r.packageRefs === 1 ? "content" : "contents"}` : ""}.`);
     } catch (e) {
       actions.toast("error", e instanceof Error ? e.message : String(e));
     }
   };
+
+  const deleteSelected = () => deleteEntries([...selected], selected.size - visibleSelected);
 
   /** The next editable column after `col` in the same row (Tab), or before it (Shift+Tab). */
   const step = (row: CommodityRow, col: number, back: boolean) => {
@@ -363,7 +387,8 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
     setBusy(true);
     try {
       const r = await api.addCommodity(fileId, { itemId, donor, ...(addTab ?? {}) });
-      apply({ columns: r.columns, rows: [r.row], file: r.file }, [IMG]);
+      // The new entry goes at the end of its tab's run, so the entries after it were renamed: reload.
+      const rows = await reload(r.file, [IMG]);
       const sn = r.row.cells[r.columns.findIndex((c) => c.name.toLowerCase() === "sn")]?.value;
       actions.toast("success", `Added entry ${r.row.name} for item ${itemId}${sn ? ` with SN ${sn}` : ""}.`);
       setNewItem("");
@@ -372,7 +397,7 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
       if (!addTab) setTabFilter(null);
       setFlash(r.row.name);
       setTimeout(() => setFlash((f) => (f === r.row.name ? null : f)), 2500);
-      scrollToRow(r.row.name, [...(addTab ? (table?.rows ?? []).filter(inTab) : table?.rows ?? []), r.row]);
+      scrollToRow(r.row.name, addTab ? rows.filter(inTab) : rows);
     } catch (err) {
       actions.toast("error", err instanceof Error ? err.message : String(err));
     } finally {
@@ -564,7 +589,7 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
                             Raw
                           </button>
                         )}
-                        <button type="button" onClick={() => void actions.deleteNode(fileId, `${IMG}/${row.name}`, `entry ${row.name}`)} title="Delete entry" aria-label={`Delete entry ${row.name}`}
+                        <button type="button" onClick={() => void deleteEntries([row.name])} title="Delete entry" aria-label={`Delete entry ${row.name}`}
                           className="rounded-md p-1.5 text-zinc-500 hover:bg-rose-100 hover:text-rose-700 dark:hover:bg-rose-500/20">
                           <XMark className="size-4" />
                         </button>

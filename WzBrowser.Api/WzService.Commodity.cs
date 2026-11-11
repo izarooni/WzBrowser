@@ -17,9 +17,14 @@ public record CommoditySetRequest(string Entry, string Property, string Type, st
 /// <param name="Category">With <paramref name="Sub"/>: put the SN in this Cash Shop tab (Category.img) instead,
 /// i.e. Category * 10000000 + Sub * 100000 + the lowest free number. <paramref name="Donor"/> is then ignored.</param>
 public record CommodityAddRequest(int ItemId, bool Donor, int? Category = null, int? Sub = null);
+/// <param name="Row">The new entry, under the name it got once the entries were renumbered.</param>
 public record CommodityRowResult(List<CommodityColumn> Columns, CommodityRow Row, OpenedFileDto File);
 /// <param name="Rows">Each entry that was edited, once, as it is now.</param>
-public record CommodityRowsResult(List<CommodityColumn> Columns, List<CommodityRow> Rows, OpenedFileDto File);
+/// <param name="Renumbered">An SN edit moved entries between tabs, so other entries were renamed too: reload the table.</param>
+/// <param name="PackageRefs">Package contents switched to the edited entries' new SNs.</param>
+public record CommodityRowsResult(List<CommodityColumn> Columns, List<CommodityRow> Rows, OpenedFileDto File, bool Renumbered = false, int PackageRefs = 0);
+/// <param name="PackageRefs">Package contents (CashPackage.img) removed with the entries.</param>
+public record CommodityDeleteResult(OpenedFileDto File, int Deleted, int PackageRefs);
 
 /// <summary>Etc.wz's Commodity.img: the Cash Shop catalogue, one numbered sub property per entry.</summary>
 public sealed partial class WzService
@@ -74,6 +79,10 @@ public sealed partial class WzService
                 targets.Add((sub, prop, req));
             }
 
+            // SN edits: remember each entry's old SN so packages can follow it, and the layout may need redoing.
+            var snEdits = targets.Any(t => t.Req.Property.Equals("SN", StringComparison.OrdinalIgnoreCase));
+            var oldSns = snEdits ? targets.Select(t => t.Sub).Distinct().ToDictionary(s => s, SnOfEntry) : null;
+
             foreach (var (sub, existing, req) in targets)
             {
                 var prop = existing ?? sub[req.Property];
@@ -81,16 +90,32 @@ public sealed partial class WzService
                 SetValue(prop, req.Value);
                 MarkChanged(sub);
             }
+
+            var renumbered = false;
+            var packageRefs = 0;
+            if (oldSns != null)
+            {
+                renumbered = RenumberCommodity(img);
+                // A package pointing at an SN that no entry has any more follows the entry to its new SN.
+                var remaining = img.WzProperties.Select(SnOfEntry).OfType<int>().ToHashSet();
+                var moved = new Dictionary<int, int>();
+                foreach (var (sub, old) in oldSns)
+                    if (old is { } o && SnOfEntry(sub) is { } now && now != o && !remaining.Contains(o)) moved.TryAdd(o, now);
+                if (moved.Count > 0) packageRefs = EditPackages(entry, sn => moved.GetValueOrDefault(sn, sn));
+            }
             Touch(entry);
 
             var columns = CommodityColumns(img);
             var rows = targets.Select(t => t.Sub).Distinct().Select(s => CommodityRowOf(s, columns)).ToList();
-            return new CommodityRowsResult(columns, rows, Describe(id, entry));
+            return new CommodityRowsResult(columns, rows, Describe(id, entry), renumbered, packageRefs);
         }
     }
 
-    /// <summary>Removes entries by name. All must exist, or nothing is removed.</summary>
-    public OpenedFileDto DeleteCommodity(string id, List<string> entries)
+    /// <summary>
+    /// Removes entries by name, renumbers the rest "0".."N-1" (the client stops loading at a gap) and takes the removed
+    /// SNs out of every package in CashPackage.img. All must exist, or nothing is removed.
+    /// </summary>
+    public CommodityDeleteResult DeleteCommodity(string id, List<string> entries)
     {
         if (entries.Count == 0) throw new ArgumentException("Nothing to delete.");
         var entry = GetEtcArchive(id);
@@ -99,16 +124,15 @@ public sealed partial class WzService
             var img = CommodityImage(entry);
             var props = entries.Distinct().Select(name =>
                 img[name] ?? throw new KeyNotFoundException($"Entry '{name}' not found in {CommodityImg}.")).ToList();
-            foreach (var p in props) p.Remove();
-            MarkChanged(img);
+            var packageRefs = RemoveCommodityEntries(entry, img, props);
             Touch(entry);
-            return Describe(id, entry);
+            return new CommodityDeleteResult(Describe(id, entry), props.Count, packageRefs);
         }
     }
 
     /// <summary>
-    /// Adds an entry named one past the highest numbered entry, filled with CashCommodities' defaults and a fresh SN.
-    /// Property names follow the spelling the file already uses (e.g. "gender" vs "Gender").
+    /// Adds an entry filled with CashCommodities' defaults and a fresh SN, then renumbers the entries so it sits at the
+    /// end of its tab's run. Property names follow the spelling the file already uses (e.g. "gender" vs "Gender").
     /// </summary>
     public CommodityRowResult AddCommodity(string id, CommodityAddRequest req)
     {
@@ -135,6 +159,7 @@ public sealed partial class WzService
             }
 
             img.AddProperty(sub);
+            RenumberCommodity(img);
             MarkChanged(img);
             Touch(entry);
 
