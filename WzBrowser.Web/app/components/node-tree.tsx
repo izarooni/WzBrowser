@@ -7,6 +7,7 @@ import { ArrowUp, ChevronRight, Copy, Document, Download, ExclamationTriangle, F
 import { EDITABLE, invalid } from "../lib/values";
 import { IMAGE_QUALITIES, formatName, loadImageQuality, saveImageQuality } from "../lib/image-quality";
 import { download } from "../lib/download";
+import { copyText } from "../lib/copy-text";
 import { ContextMenu, type MenuItem } from "./context-menu";
 import { NewPropertyDialog } from "./new-property-dialog";
 import { inputClass } from "./ui";
@@ -337,7 +338,7 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
     }
     const into = readOnly ? null : createTarget(path);
     if (into != null) items.push({ label: `New property${into !== path ? ` in “${baseName(into)}”` : ""}…`, onSelect: () => { setCreating(into); expand(into); } });
-    if (path) items.push({ label: "Copy path", onSelect: () => void navigator.clipboard.writeText(path).catch(() => ws.toast("error", "The clipboard is blocked.")) });
+    if (path) items.push({ label: "Copy path", onSelect: () => void copyText(path).catch(() => ws.toast("error", "The clipboard is blocked.")) });
 
     const saves: MenuItem[] = [];
     if (node.type === "canvas") saves.push({ label: "Save PNG", icon: <Download className="size-4" />, onSelect: () => void saveCanvas(path) });
@@ -603,7 +604,7 @@ function Detail({ fileId, path, node, fileName, childCount, canPasteHere, onCopy
 
   const isProperty = !NOT_PROPERTY.has(node.type);
   const copyPath = async () => {
-    try { await navigator.clipboard.writeText(path); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* clipboard blocked */ }
+    try { await copyText(path); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { ws.toast("error", "The clipboard is blocked."); }
   };
   const saveImage = async () => {
     setBusy(true);
