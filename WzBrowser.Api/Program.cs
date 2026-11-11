@@ -21,6 +21,15 @@ var wzService = new WzService(root);
 if (wzService.Root != null && !Directory.Exists(wzService.Root))
     Console.WriteLine($"Warning: library folder '{wzService.Root}' doesn't exist.");
 builder.Services.AddSingleton(wzService);
+// MCP tools at /mcp for Claude and other agents, over the same open files (see WzMcpTools). Stateless: every bit of
+// state already lives in WzService. Callers on other computers or behind a proxy are refused below (it's all POSTs).
+// Results go to a model, so keep them compact: no "-style escaping and no null fields.
+builder.Services.AddMcpServer().WithHttpTransport(o => o.Stateless = true).WithTools<WzMcpTools>(
+    new System.Text.Json.JsonSerializerOptions(ModelContextProtocol.McpJsonUtilities.DefaultOptions)
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    });
 
 var host = ArgValues("--host").FirstOrDefault() ?? "127.0.0.1";
 var requestedPort = int.TryParse(ArgValues("--port").FirstOrDefault() ?? Environment.GetEnvironmentVariable("WZBROWSER_PORT"), out var p) ? p : 5178;
@@ -238,10 +247,12 @@ api.MapPost("/xml-export", (XmlExportRequest req, WzService wz) => wz.StartXmlEx
 api.MapGet("/xml-export/{id}", (string id, WzService wz) => wz.XmlExportStatus(id));
 api.MapDelete("/xml-export/{id}", (string id, WzService wz) => wz.CancelXmlExport(id));
 api.MapFallback(() => Results.NotFound(new { error = "Unknown API route." }));
+app.MapMcp("/mcp");
 
 app.MapGet("/",() => Results.Text($"WzBrowser API listening on http://{host}:{port}\nOpen the WzBrowser web app and point it at this address.\n", "text/plain"));
 
 Console.WriteLine($"WzBrowser API listening on http://{host}:{port}  (Ctrl+C to quit)");
+Console.WriteLine($"MCP server: http://{host}:{port}/mcp");
 if (wzService.Root != null) Console.WriteLine($"Serving only the .wz files in {wzService.Root} (view only through a proxy or from other computers)");
 app.Run();
 

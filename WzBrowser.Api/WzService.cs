@@ -62,13 +62,17 @@ public sealed partial class WzService(string? root = null)
     {
         if (Root == null) throw new InvalidDataException("This server isn't pinned to a folder.");
         if (!Directory.Exists(Root)) throw new DirectoryNotFoundException($"Library folder not found: {Root}");
-        var files = Directory.EnumerateFiles(Root, "*.wz", SearchOption.AllDirectories)
-            .Where(f => !File.Exists(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(f)!, System.IO.Path.GetFileNameWithoutExtension(f) + "_000.wz")))
-            .Select(f => new LibraryFile(System.IO.Path.GetRelativePath(Root, f).Replace('\\', '/'), f, new FileInfo(f).Length));
+        var files = WzFilesIn(Root);
         if (browsableOnly)
             files = files.Select(f => f with { Kind = ProbeKind(f.Path) }).Where(f => IsBrowsable(f.Kind!));
         return files.OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
+
+    /// <summary>Every .wz file under <paramref name="folder"/> except a modular folder's index stub, named relative to it.</summary>
+    private static IEnumerable<LibraryFile> WzFilesIn(string folder) =>
+        Directory.EnumerateFiles(folder, "*.wz", SearchOption.AllDirectories)
+            .Where(f => !File.Exists(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(f)!, System.IO.Path.GetFileNameWithoutExtension(f) + "_000.wz")))
+            .Select(f => new LibraryFile(System.IO.Path.GetRelativePath(folder, f).Replace('\\', '/'), f, new FileInfo(f).Length));
 
     /// <summary>Quest archives and Etc.wz have a view of their own; other files only have the raw tree.</summary>
     public static bool IsBrowsable(string kind) => kind is "quest" or "etc";

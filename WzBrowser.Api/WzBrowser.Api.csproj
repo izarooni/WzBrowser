@@ -26,4 +26,8 @@
     <ProjectReference Include="..\deps\MapleLib\MapleLib\MapleLib.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.4.0" />
+  </ItemGroup>
+
 </Project>
