@@ -207,6 +207,12 @@ api.MapGet("/files/{id}/commodity", (string id, WzService wz) => wz.Commodity(id
 api.MapPut("/files/{id}/commodity", (string id, List<CommoditySetRequest> sets, WzService wz) => wz.SetCommodity(id, sets));
 api.MapPost("/files/{id}/commodity", (string id, CommodityAddRequest req, WzService wz) => wz.AddCommodity(id, req));
 api.MapPost("/files/{id}/commodity/delete", (string id, List<string> entries, WzService wz) => wz.DeleteCommodity(id, entries));
+
+// Etc.wz's Category.img (Cash Shop tabs): sub tabs grouped by their fixed Category; add, rename and delete sub tabs.
+api.MapGet("/files/{id}/category", (string id, WzService wz) => wz.Categories(id));
+api.MapPost("/files/{id}/category", (string id, CategoryAddRequest req, WzService wz) => wz.AddCategorySub(id, req));
+api.MapPut("/files/{id}/category", (string id, CategoryRenameRequest req, WzService wz) => wz.RenameCategorySub(id, req));
+api.MapPost("/files/{id}/category/delete", (string id, List<string> entries, WzService wz) => wz.DeleteCategorySubs(id, entries));
 // Links from a quest archive (or Etc.wz) to the things it mentions (items, NPCs, mobs, maps, skills) in the neighbouring files.
 api.MapPost("/files/{id}/ref/open", (string id, RefOpenRequest req, WzService wz) => wz.OpenRef(id, req));
 api.MapGet("/files/{id}/preview", (string id, string kind, int refId, HttpContext ctx, WzService wz) =>

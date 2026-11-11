@@ -14,7 +14,9 @@ public record CommodityTable(List<CommodityColumn> Columns, List<CommodityRow> R
 /// <param name="Type">Type to create the property with when the entry doesn't have it yet.</param>
 public record CommoditySetRequest(string Entry, string Property, string Type, string Value);
 /// <param name="Donor">Donor items get SNs from 10000000, regular ones from 20000000.</param>
-public record CommodityAddRequest(int ItemId, bool Donor);
+/// <param name="Category">With <paramref name="Sub"/>: put the SN in this Cash Shop tab (Category.img) instead,
+/// i.e. Category * 10000000 + Sub * 100000 + the lowest free number. <paramref name="Donor"/> is then ignored.</param>
+public record CommodityAddRequest(int ItemId, bool Donor, int? Category = null, int? Sub = null);
 public record CommodityRowResult(List<CommodityColumn> Columns, CommodityRow Row, OpenedFileDto File);
 /// <param name="Rows">Each entry that was edited, once, as it is now.</param>
 public record CommodityRowsResult(List<CommodityColumn> Columns, List<CommodityRow> Rows, OpenedFileDto File);
@@ -119,7 +121,9 @@ public sealed partial class WzService
 
             var next = img.WzProperties.Select(p => int.TryParse(p.Name, out var n) ? n : -1).DefaultIfEmpty(-1).Max() + 1;
             var sub = new WzSubProperty(next.ToString(CultureInfo.InvariantCulture));
-            var sn = GenerateSn(img, req.Donor, req.ItemId);
+            var sn = req.Category is { } tabCategory && req.Sub is { } tabSub
+                ? GenerateSn(img, TabSnBase(tabCategory, tabSub))
+                : GenerateSn(img, (req.Donor ? 10000000 : 20000000) + SnCategory(req.ItemId, req.Donor) * 100000);
 
             foreach (var (name, value) in CommodityDefaults)
             {
@@ -141,22 +145,31 @@ public sealed partial class WzService
 
     // ------------------------------------------------------------------ SN
 
-    /// <summary>
-    /// CashCommodities' scheme: 1xxxxxxx for donor items, 2xxxxxxx for regular ones; the next digit (times 100000)
-    /// is the Cash Shop category the client files the item under; then the lowest free number from 1.
-    /// </summary>
-    private static int GenerateSn(WzImage img, bool donor, int itemId)
+    /// <summary>The lowest unused SN above <paramref name="sn"/> (a tab's base, see <see cref="TabSnBase"/>).</summary>
+    private static int GenerateSn(WzImage img, int sn)
     {
         var used = new HashSet<int>();
         foreach (var p in img.WzProperties)
             if (FindProp(p, "SN") is { } snProp && int.TryParse(Describe(snProp).Value, out var v)) used.Add(v);
 
-        var sn = (donor ? 10000000 : 20000000) + SnCategory(itemId, donor) * 100000;
         var i = 1;
         while (used.Contains(sn + i)) i++;
+        if (i >= 100000) throw new InvalidDataException($"No free SN left in {sn}..{sn + 99999}.");
         return sn + i;
     }
 
+    /// <summary>The client files an entry under the tab its SN names: Category * 10000000 + CategorySub * 100000 + n.</summary>
+    private static int TabSnBase(int category, int sub)
+    {
+        if (category is < 1 or > 213) throw new ArgumentException($"Category {category} can't be written into an SN.");
+        if (sub is < 0 or > 99) throw new ArgumentException($"Sub category {sub} can't be written into an SN (0-99).");
+        return category * 10000000 + sub * 100000;
+    }
+
+    /// <summary>
+    /// CashCommodities' scheme: 1xxxxxxx for donor items, 2xxxxxxx for regular ones; the next digit (times 100000)
+    /// is the Cash Shop sub tab the client files the item under.
+    /// </summary>
     private static int SnCategory(int itemId, bool donor)
     {
         var type = itemId / 10000;

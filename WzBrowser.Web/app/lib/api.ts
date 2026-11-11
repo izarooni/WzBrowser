@@ -70,6 +70,13 @@ export interface CommodityRowResult { columns: CommodityColumn[]; row: Commodity
 export interface CommodityRowsResult { columns: CommodityColumn[]; rows: CommodityRow[]; file: OpenedFile }
 export interface CommoditySet { entry: string; property: string; type: string; value: string }
 
+/** One Category.img entry: a Cash Shop sub tab. `entry` is the numbered property that holds it. */
+export interface CategorySub { entry: string; sub: number; name: string }
+/** A top Cash Shop tab (fixed by the client) and its sub tabs, in CategorySub order. */
+export interface CategoryGroup { category: number; subs: CategorySub[] }
+export interface CategoryTable { categories: CategoryGroup[] }
+export interface CategoryResult { table: CategoryTable; file: OpenedFile }
+
 export type LookupKind = "npc" | "item" | "mob" | "map" | "skill" | "quest";
 
 /** Where a link leads: the file that holds the thing, and its node inside that file. */
@@ -281,8 +288,9 @@ export function createApi(base: string) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(sets),
       }),
-    /** Adds an entry with default values and a generated SN (donor items 1xxxxxxx, regular 2xxxxxxx). */
-    addCommodity: (id: string, body: { itemId: number; donor: boolean }) =>
+    /** Adds an entry with default values and a generated SN: in the given Cash Shop tab (category/sub), or else
+     * donor items 1xxxxxxx and regular 2xxxxxxx. */
+    addCommodity: (id: string, body: { itemId: number; donor: boolean; category?: number; sub?: number }) =>
       request<CommodityRowResult>(`/api/files/${id}/commodity`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -291,6 +299,27 @@ export function createApi(base: string) {
     /** Removes these Commodity.img entries; all must exist, or nothing is removed. */
     deleteCommodity: (id: string, entries: string[]) =>
       request<OpenedFile>(`/api/files/${id}/commodity/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(entries),
+      }),
+    categories: (id: string) => request<CategoryTable>(`/api/files/${id}/category`),
+    /** Adds a sub tab under `category`, with the lowest CategorySub that category doesn't use yet. */
+    addCategorySub: (id: string, body: { category: number; name: string }) =>
+      request<CategoryResult>(`/api/files/${id}/category`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    renameCategorySub: (id: string, body: { entry: string; name: string }) =>
+      request<CategoryResult>(`/api/files/${id}/category`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    /** Removes these Category.img entries; all must exist and no category may lose its last sub tab, or nothing is removed. */
+    deleteCategorySubs: (id: string, entries: string[]) =>
+      request<CategoryResult>(`/api/files/${id}/category/delete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(entries),

@@ -1,9 +1,10 @@
 import { memo, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import type { CommodityCell, CommodityColumn, CommodityRow, CommodityRowsResult, CommodityTable } from "../lib/api";
+import type { CategoryTable, CommodityCell, CommodityColumn, CommodityRow, CommodityRowsResult, CommodityTable } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { useNames } from "../lib/use-names";
 import { EDITABLE, INTEGER, invalid } from "../lib/values";
 import { useActions } from "../lib/workspace";
+import { CategorySidebar, snTab, tabKey, type TabFilter } from "./category-sidebar";
 import { Plus, Search, XMark } from "./icons";
 import { RefCtx, RefLink, type RefContext } from "./ref-link";
 import { buttonPrimary, inputClass } from "./ui";
@@ -40,7 +41,10 @@ function remap(row: CommodityRow, from: CommodityColumn[], to: CommodityColumn[]
 
 const colWidth = (c: CommodityColumn) => (c.type === "string" ? 200 : c.name.toLowerCase() === "sn" ? 120 : 104);
 
-/** Commodity.img (Etc.wz) as a table: one row per Cash Shop entry, every value editable in place, plus adding entries. */
+/**
+ * Commodity.img (Etc.wz) as a table: one row per Cash Shop entry, every value editable in place, plus adding entries.
+ * Beside it, Category.img's tabs filter the table to the entries whose SN files them under that tab.
+ */
 export const CommodityEditor = memo(function CommodityEditor({ fileId, revision, onOpenRaw, readOnly = false }: {
   fileId: string;
   revision: number;
@@ -96,6 +100,17 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
   const colIndex = (name: string) => columns.findIndex((c) => c.name.toLowerCase() === name);
   const itemCol = colIndex("itemid");
   const snCol = colIndex("sn");
+  const onSaleCol = colIndex("onsale");
+  // Display order of the value columns after Item; OnSale is pulled out to sit between Entry and Item.
+  const order = useMemo(() => {
+    const all = columns.map((_, i) => i);
+    return onSaleCol < 0 ? all : all.filter((i) => i !== onSaleCol);
+  }, [columns, onSaleCol]);
+  const snOf = (row: CommodityRow) => {
+    const v = snCol < 0 ? null : row.cells[snCol]?.value;
+    const n = v == null ? NaN : Number(v);
+    return Number.isInteger(n) && n > 0 ? n : null;
+  };
   const itemIdOf = (row: CommodityRow) => {
     const v = itemCol < 0 ? null : row.cells[itemCol]?.value;
     const n = v == null ? NaN : Number(v);
@@ -127,9 +142,50 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
     return rows;
   }, [table, sort]);
 
+  // ------------------------------------------------------------ Cash Shop tabs (Category.img)
+
+  const [tabs, setTabs] = useState<CategoryTable | null>(null);
+  const [tabFilter, setTabFilter] = useState<TabFilter>(null);
+  const known = useMemo(() => new Set(tabs?.categories.flatMap((g) => g.subs.map((s) => tabKey(g.category, s.sub))) ?? []), [tabs]);
+  /** The tab key each row's SN names, or null without an SN. */
+  const rowTab = (row: CommodityRow) => {
+    const sn = snOf(row);
+    if (sn == null) return null;
+    const t = snTab(sn);
+    return tabKey(t.category, t.sub);
+  };
+  const counts = useMemo(() => {
+    if (!table) return null;
+    const m = new Map<string, number>();
+    for (const r of table.rows) { const k = rowTab(r); if (k) m.set(k, (m.get(k) ?? 0) + 1); }
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [table, snCol]);
+  const isOther = (row: CommodityRow) => { const k = rowTab(row); return k == null || !known.has(k); };
+  const otherCount = useMemo(() => (!table || !tabs ? 0 : table.rows.reduce((n, r) => n + (isOther(r) ? 1 : 0), 0)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [table, tabs, known, snCol]);
+  // A filter on "other" with nothing left in it, or on a category that's gone, falls back to every entry.
+  useEffect(() => {
+    if (!tabs || !tabFilter) return;
+    if (tabFilter === "other" ? otherCount === 0 : !tabs.categories.some((g) => g.category === tabFilter.category)) setTabFilter(null);
+  }, [tabFilter, tabs, otherCount]);
+  const inTab = (row: CommodityRow) => {
+    if (!tabFilter) return true;
+    if (tabFilter === "other") return isOther(row);
+    const sn = snOf(row);
+    if (sn == null) return false;
+    const t = snTab(sn);
+    return t.category === tabFilter.category && (tabFilter.sub == null || t.sub === tabFilter.sub);
+  };
+  /** The sub tab new entries go into, when one is selected. */
+  const addTab = tabFilter && tabFilter !== "other" && tabFilter.sub != null ? { category: tabFilter.category, sub: tabFilter.sub } : null;
+  const addTabName = addTab && tabs?.categories.find((g) => g.category === addTab.category)?.subs.find((s) => s.sub === addTab.sub)?.name;
+
   // Not memoised: item names arrive after the table, and a pass over a few thousand rows is cheap.
   const needle = filter.trim().toLowerCase();
-  const visible = !needle ? sorted : sorted.filter((r) => {
+  const inTabRows = !tabFilter ? sorted : sorted.filter(inTab);
+  const visible = !needle ? inTabRows : inTabRows.filter((r) => {
     if (r.name.toLowerCase().includes(needle)) return true;
     if (r.cells.some((c) => c?.value?.toLowerCase().includes(needle))) return true;
     const id = itemIdOf(r);
@@ -277,7 +333,8 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
 
   /** The next editable column after `col` in the same row (Tab), or before it (Shift+Tab). */
   const step = (row: CommodityRow, col: number, back: boolean) => {
-    for (let c = col + (back ? -1 : 1); c >= 0 && c < columns.length; c += back ? -1 : 1) {
+    for (let at = order.indexOf(col) + (back ? -1 : 1); at >= 0 && at < order.length; at += back ? -1 : 1) {
+      const c = order[at];
       const type = row.cells[c]?.type ?? columns[c].type;
       if (EDITABLE.has(type) && columns[c].name.toLowerCase() !== "onsale") return setEditing({ row: row.name, col: c });
     }
@@ -297,16 +354,17 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
     if (!Number.isInteger(itemId) || itemId <= 0) { actions.toast("error", "Enter the item id to sell, e.g. 1002186."); return; }
     setBusy(true);
     try {
-      const r = await api.addCommodity(fileId, { itemId, donor });
+      const r = await api.addCommodity(fileId, { itemId, donor, ...(addTab ?? {}) });
       apply({ columns: r.columns, rows: [r.row], file: r.file }, [IMG]);
       const sn = r.row.cells[r.columns.findIndex((c) => c.name.toLowerCase() === "sn")]?.value;
       actions.toast("success", `Added entry ${r.row.name} for item ${itemId}${sn ? ` with SN ${sn}` : ""}.`);
       setNewItem("");
       setFilter("");
       setSort(null);
+      if (!addTab) setTabFilter(null);
       setFlash(r.row.name);
       setTimeout(() => setFlash((f) => (f === r.row.name ? null : f)), 2500);
-      scrollToRow(r.row.name, [...(table?.rows ?? []), r.row]);
+      scrollToRow(r.row.name, [...(addTab ? (table?.rows ?? []).filter(inTab) : table?.rows ?? []), r.row]);
     } catch (err) {
       actions.toast("error", err instanceof Error ? err.message : String(err));
     } finally {
@@ -317,13 +375,44 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
   // ------------------------------------------------------------ layout
 
   const ref = useMemo<RefContext>(() => ({ fileId, openQuest: () => {} }), [fileId]);
-  const template = [...(readOnly ? [] : ["40px"]), "88px", ...(itemCol >= 0 ? ["240px"] : []), ...columns.map((c) => `${colWidth(c)}px`), ...(readOnly ? [] : ["84px"])].join(" ");
+  const template = [...(readOnly ? [] : ["40px"]), "88px", ...(onSaleCol >= 0 ? [`${colWidth(columns[onSaleCol])}px`] : []), ...(itemCol >= 0 ? ["240px"] : []), ...order.map((i) => `${colWidth(columns[i])}px`), ...(readOnly ? [] : ["84px"])].join(" ");
   const headCell = "flex items-center gap-1.5 px-3 text-left text-xs font-semibold text-zinc-600 dark:text-zinc-300";
   const sortMark = (col: number) => (sort?.col === col ? (sort.desc ? " ↓" : " ↑") : "");
+  const columnHead = (i: number) => {
+    const c = columns[i];
+    return (
+      <button key={c.name} type="button" role="columnheader" onClick={() => toggleSort(i)} title={`${c.name} (${c.type}) — click to sort`}
+        className={`${headCell} ${c.type === "string" ? "" : "justify-end"}`}>
+        <span className="truncate">{c.name}{sortMark(i)}</span>
+        <span className="shrink-0 rounded bg-zinc-200/70 px-1 font-mono text-[10px] font-normal text-zinc-500 dark:bg-zinc-800">{c.type}</span>
+      </button>
+    );
+  };
+  const cellAt = (row: CommodityRow, col: number) => (
+    <Cell
+      key={columns[col].name}
+      column={columns[col]}
+      cell={row.cells[col]}
+      readOnly={readOnly}
+      editing={editing?.row === row.name && editing.col === col}
+      pending={pending.has(`${row.name}/${col}`)}
+      anchor={anchorRow === row.name && anchor.current?.col === col}
+      onEdit={() => setEditing({ row: row.name, col })}
+      onToggle={(shift) => toggle(row, col, shift)}
+      onDone={(value, move) => {
+        if (value != null) void commit(row, col, value);
+        if (move) step(row, col, move === "back"); else setEditing(null);
+      }}
+    />
+  );
 
   return (
     <RefCtx.Provider value={ref}>
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1">
+      <CategorySidebar fileId={fileId} revision={revision} counts={counts} total={table?.rows.length ?? null} other={otherCount}
+        selected={tabFilter} onTabs={setTabs} onOpenRaw={onOpenRaw}
+        onSelect={(f) => { setTabFilter(f); if (scrollRef.current) scrollRef.current.scrollTop = 0; }} />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="flex flex-wrap items-center gap-3 border-b border-zinc-100 p-3 dark:border-zinc-800">
           <label className="relative block min-w-48 flex-1">
             <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
@@ -348,7 +437,7 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
             )}
           </label>
           <p className="shrink-0 text-xs text-zinc-500">
-            {table ? (needle ? `${visible.length.toLocaleString()} of ${table.rows.length.toLocaleString()} entries` : `${table.rows.length.toLocaleString()} entries`) : error ? "" : "Loading…"}
+            {table ? (needle || tabFilter ? `${visible.length.toLocaleString()} of ${table.rows.length.toLocaleString()} entries` : `${table.rows.length.toLocaleString()} entries`) : error ? "" : "Loading…"}
           </p>
           {!readOnly && <>
           <button type="button" onClick={() => void deleteSelected()} disabled={selected.size === 0}
@@ -376,15 +465,19 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
                 className={`${inputClass} !rounded-lg !py-2 font-mono`}
               />
             </label>
-            <label className="flex items-center gap-2 pb-2 text-[13px]">
-              <input type="checkbox" checked={donor} onChange={(e) => setDonor(e.target.checked)} className="size-4 accent-accent-600" />
-              Donor item
-            </label>
+            {!addTab && (
+              <label className="flex items-center gap-2 pb-2 text-[13px]">
+                <input type="checkbox" checked={donor} onChange={(e) => setDonor(e.target.checked)} className="size-4 accent-accent-600" />
+                Donor item
+              </label>
+            )}
             <button type="submit" disabled={busy || !table} className={`${buttonPrimary} !rounded-lg !px-4 !py-2 !text-[13px]`}>
               {busy ? "Adding…" : "Add"}
             </button>
             <p className="basis-full text-xs leading-5 text-zinc-500">
-              The SN is generated from the item's category: {donor ? "1" : "2"}<i>C</i>xxxxxx, where <i>C</i> is the Cash Shop tab and the rest is the lowest free number.
+              {addTab
+                ? <>The SN goes in the selected tab{addTabName ? <> (<b className="font-semibold">{addTabName}</b>)</> : null}: {addTab.category}{String(addTab.sub).padStart(2, "0")}xxxxx, with the lowest free number.</>
+                : <>The SN is generated from the item's category: {donor ? "1" : "2"}<i>C</i>xxxxxx, where <i>C</i> is the Cash Shop tab and the rest is the lowest free number. Select a sub tab on the left to put the SN there instead.</>}
               The new entry starts on sale for 4000 NX, 90 days, count 1, both genders, priority 99 and no tag; change any of it in the table.
             </p>
           </form>
@@ -412,18 +505,13 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
                     className="size-4 cursor-pointer accent-accent-600" />
                 </div>}
                 <button type="button" role="columnheader" onClick={() => toggleSort(-1)} className={headCell}>Entry{sortMark(-1)}</button>
+                {onSaleCol >= 0 && columnHead(onSaleCol)}
                 {itemCol >= 0 && <div role="columnheader" className={headCell}>Item</div>}
-                {columns.map((c, i) => (
-                  <button key={c.name} type="button" role="columnheader" onClick={() => toggleSort(i)} title={`${c.name} (${c.type}) — click to sort`}
-                    className={`${headCell} ${c.type === "string" ? "" : "justify-end"}`}>
-                    <span className="truncate">{c.name}{sortMark(i)}</span>
-                    <span className="shrink-0 rounded bg-zinc-200/70 px-1 font-mono text-[10px] font-normal text-zinc-500 dark:bg-zinc-800">{c.type}</span>
-                  </button>
-                ))}
+                {order.map(columnHead)}
                 {!readOnly && <div role="columnheader" className="sr-only">Actions</div>}
               </div>
 
-              {visible.length === 0 && <p className="px-4 py-10 text-center text-sm text-zinc-500">{needle ? "No entries match." : "Commodity.img is empty."}</p>}
+              {visible.length === 0 && <p className="px-4 py-10 text-center text-sm text-zinc-500">{needle ? "No entries match." : tabFilter ? "No entries in this tab." : "Commodity.img is empty."}</p>}
 
               <div role="rowgroup" style={{ height: visible.length * ROW_H, position: "relative" }}>
                 {shown.map((row, i) => {
@@ -449,6 +537,7 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
                           className={`size-4 cursor-pointer accent-accent-600 ${anchorRow === row.name && anchor.current?.col === SELECT ? "rounded-sm outline-2 outline-offset-2 outline-accent-500" : ""}`} />
                       </div>}
                       <div role="cell" className="flex items-center px-3 font-mono text-xs tabular-nums text-zinc-500">{row.name}</div>
+                      {onSaleCol >= 0 && cellAt(row, onSaleCol)}
                       {itemCol >= 0 && (
                         <div role="cell" className="flex min-w-0 items-center gap-1.5 px-2">
                           <span className="grid size-8 shrink-0 place-items-center">{itemId != null && <ItemIcon key={itemId} fileId={fileId} id={itemId} />}</span>
@@ -459,23 +548,7 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
                           </span>
                         </div>
                       )}
-                      {columns.map((c, col) => (
-                        <Cell
-                          key={c.name}
-                          column={c}
-                          cell={row.cells[col]}
-                          readOnly={readOnly}
-                          editing={editing?.row === row.name && editing.col === col}
-                          pending={pending.has(`${row.name}/${col}`)}
-                          anchor={anchorRow === row.name && anchor.current?.col === col}
-                          onEdit={() => setEditing({ row: row.name, col })}
-                          onToggle={(shift) => toggle(row, col, shift)}
-                          onDone={(value, move) => {
-                            if (value != null) void commit(row, col, value);
-                            if (move) step(row, col, move === "back"); else setEditing(null);
-                          }}
-                        />
-                      ))}
+                      {order.map((col) => cellAt(row, col))}
                       {!readOnly && <div role="cell" className="flex items-center justify-end gap-0.5 px-2 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">
                         {onOpenRaw && (
                           <button type="button" onClick={() => onOpenRaw(`${IMG}/${row.name}`)} title="Show in raw tree" aria-label={`Show entry ${row.name} in raw tree`}
@@ -498,6 +571,7 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
             <p className="p-4 text-xs text-amber-700 dark:text-amber-300">These entries have no SN property; new entries still get one.</p>
           )}
         </div>
+      </div>
       </div>
     </RefCtx.Provider>
   );
