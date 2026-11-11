@@ -173,6 +173,11 @@ public sealed partial class WzService
             ["quest"] = [],
         };
 
+        // Item.wz/Special (9xxxxxx: Cash Shop packages and such) isn't in String.wz; each entry carries its own name.
+        foreach (var itemId in (req.Item ?? []).Distinct())
+            if (itemId / 1000000 == 9 && !result["item"].ContainsKey(itemId) && SpecialItemName(entry.Path, itemId) is { } special)
+                result["item"][itemId] = special;
+
         if (req.Quest is { Count: > 0 } && entry.Kind == "quest")
         {
             // Quest names come from the open archive itself, so they reflect unsaved edits too.

@@ -47,7 +47,8 @@ public sealed partial class WzService
 
             var candidates = kind switch
             {
-                "item" => new[] { "info/icon", "info/iconRaw" },
+                // Item.wz/Special entries keep their icon directly under the entry.
+                "item" => new[] { "info/icon", "info/iconRaw", "icon" },
                 "skill" => new[] { "icon", "iconMouseOver" },
                 "map" => new[] { "miniMap/canvas" },
                 _ => new[] { "stand/0", "stand", "move/0", "move", "fly/0", "default/0", "info/icon" },
@@ -135,17 +136,39 @@ public sealed partial class WzService
         return null;
     }
 
-    /// <summary>Item.wz groups by category (Consume/Install/Etc/Cash), then by the first four digits of the id.</summary>
+    /// <summary>
+    /// Item.wz groups by category (Consume/Install/Etc/Cash/Special), then by the first four digits of the id.
+    /// Special (9xxxxxx: Cash Shop packages and the like) names its entries without the leading zero.
+    /// </summary>
     private RefLoc? LocateItem(string archivePath, int id)
     {
-        var category = (id / 1000000) switch { 2 => "Consume", 3 => "Install", 4 => "Etc", 5 => "Cash", _ => null };
+        var category = (id / 1000000) switch { 2 => "Consume", 3 => "Install", 4 => "Etc", 5 => "Cash", 9 => "Special", _ => null };
         if (category == null) return null;
-        var node = $"{id:D8}";
 
         return InSibling(archivePath, "Item", category, (e, dir) =>
-                   Img(dir, $"{id / 10000:D4}.img") is { } img && img[node] != null ? $"{img.Name}/{node}" : null)
+                   Img(dir, $"{id / 10000:D4}.img") is { } img && (img[$"{id:D8}"] ?? img[$"{id}"]) is { } node
+                       ? $"{img.Name}/{node.Name}" : null)
                // Pets live in Pet/<id>.img rather than in the Cash groups.
                ?? InSibling(archivePath, "Item", "Pet", (e, dir) => Img(dir, $"{id}.img")?.Name);
+    }
+
+    /// <summary>An Item.wz/Special entry's own name (Special/0910.img/9100000/name), or null.</summary>
+    private string? SpecialItemName(string archivePath, int id)
+    {
+        if (LocateItem(archivePath, id) is not { } loc) return null;
+        var entry = Get(loc.FileId);
+        lock (entry.Lock)
+        {
+            try
+            {
+                return Resolve(entry.File, loc.Path) is WzImageProperty p && p["name"] is WzStringProperty { Value.Length: > 0 } s
+                    ? s.Value : null;
+            }
+            catch (KeyNotFoundException)
+            {
+                return null;
+            }
+        }
     }
 
     /// <summary>Equipment images are named by full id ("01002008.img") and spread over category folders.</summary>
