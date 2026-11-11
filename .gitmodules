@@ -1,3 +1,4 @@
 [submodule "deps/MapleLib"]
 	path = deps/MapleLib
-	url = https://github.com/lastbattle/MapleLib.git
+	url = https://github.com/izarooni/MapleLib.git
+	branch = main
