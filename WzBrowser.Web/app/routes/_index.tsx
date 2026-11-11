@@ -24,15 +24,31 @@ function Workspace() {
 
   const focusedId = wins.reduce<{ id: string; z: number } | null>((best, w) => (!best || w.z > best.z ? { id: w.fileId, z: w.z } : best), null)?.id;
 
-  // Dragging empty canvas pans the view. Events from windows never reach here as target === currentTarget.
-  const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
-    if (e.target !== e.currentTarget || e.button !== 0) return;
+  // Set when a middle-button pan moved, so the auxclick that follows doesn't open a link the drag began on.
+  const middleDragged = useRef(false);
+
+  const startPan = (e: PointerEvent<HTMLDivElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
     panning.current = { sx: e.clientX, sy: e.clientY, x: pan.x, y: pan.y };
   };
+  // Middle-button drag pans from anywhere, windows included: caught on the way down so windows never see it.
+  const onPointerDownCapture = (e: PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 1) return;
+    e.preventDefault();
+    e.stopPropagation();
+    middleDragged.current = false;
+    startPan(e);
+  };
+  // Left-button drag pans only from empty canvas. Events from windows never reach here as target === currentTarget.
+  const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
+    if (e.target !== e.currentTarget || e.button !== 0) return;
+    startPan(e);
+  };
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
     const p = panning.current;
-    if (p) actions.setPan(p.x + e.clientX - p.sx, p.y + e.clientY - p.sy);
+    if (!p) return;
+    if (e.clientX !== p.sx || e.clientY !== p.sy) middleDragged.current = true;
+    actions.setPan(p.x + e.clientX - p.sx, p.y + e.clientY - p.sy);
   };
   const onPointerUp = (e: PointerEvent<HTMLDivElement>) => {
     panning.current = null;
@@ -44,7 +60,11 @@ function Workspace() {
 
   return (
     <div
+      onPointerDownCapture={onPointerDownCapture}
       onPointerDown={onPointerDown}
+      // Stops the browser's middle-click autoscroll, and a link click after a middle-button pan.
+      onMouseDownCapture={(e) => { if (e.button === 1) e.preventDefault(); }}
+      onAuxClickCapture={(e) => { if (e.button === 1 && middleDragged.current) { e.preventDefault(); e.stopPropagation(); } }}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
