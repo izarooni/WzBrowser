@@ -75,7 +75,8 @@ export interface CategorySub { entry: string; sub: number; name: string }
 /** A top Cash Shop tab (fixed by the client) and its sub tabs, in CategorySub order. */
 export interface CategoryGroup { category: number; subs: CategorySub[] }
 export interface CategoryTable { categories: CategoryGroup[] }
-export interface CategoryResult { table: CategoryTable; file: OpenedFile }
+/** `deletedCommodity`: Commodity.img entries removed along with deleted sub tabs. */
+export interface CategoryResult { table: CategoryTable; file: OpenedFile; deletedCommodity: number }
 
 export type LookupKind = "npc" | "item" | "mob" | "map" | "skill" | "quest";
 

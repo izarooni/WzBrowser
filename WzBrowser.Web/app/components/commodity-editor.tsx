@@ -162,9 +162,17 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [table, snCol]);
   const isOther = (row: CommodityRow) => { const k = rowTab(row); return k == null || !known.has(k); };
-  const otherCount = useMemo(() => (!table || !tabs ? 0 : table.rows.reduce((n, r) => n + (isOther(r) ? 1 : 0), 0)),
+  const [otherCount, unfiledCount] = useMemo(() => {
+    let other = 0, unfiled = 0;
+    if (table && tabs) for (const r of table.rows) {
+      if (!isOther(r)) continue;
+      other++;
+      const sn = snOf(r);
+      if (sn != null && sn >= 10000000 && sn < 80000000) unfiled++;
+    }
+    return [other, unfiled];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [table, tabs, known, snCol]);
+  }, [table, tabs, known, snCol]);
   // A filter on "other" with nothing left in it, or on a category that's gone, falls back to every entry.
   useEffect(() => {
     if (!tabs || !tabFilter) return;
@@ -409,7 +417,7 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
   return (
     <RefCtx.Provider value={ref}>
       <div className="flex min-h-0 flex-1">
-      <CategorySidebar fileId={fileId} revision={revision} counts={counts} total={table?.rows.length ?? null} other={otherCount}
+      <CategorySidebar fileId={fileId} revision={revision} counts={counts} total={table?.rows.length ?? null} other={otherCount} unfiled={unfiledCount}
         selected={tabFilter} onTabs={setTabs} onOpenRaw={onOpenRaw}
         onSelect={(f) => { setTabFilter(f); if (scrollRef.current) scrollRef.current.scrollTop = 0; }} />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">

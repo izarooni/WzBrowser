@@ -5,6 +5,7 @@ import { useActions } from "../lib/workspace";
 import { Pencil, Plus, XMark } from "./icons";
 
 const IMG = "Category.img";
+const COMMODITY_IMG = "Commodity.img";
 
 /** The Cash Shop tab the client files an SN under: Category * 10000000 + CategorySub * 100000 + n. */
 export function snTab(sn: number) {
@@ -20,7 +21,7 @@ export type TabFilter = null | { category: number; sub?: number } | "other";
  * SNs fall in each. Clicking one filters the table. Sub tabs can be added, renamed and deleted; categories are fixed
  * by the client, so they can't.
  */
-export const CategorySidebar = memo(function CategorySidebar({ fileId, revision, counts, total, other, selected, onSelect, onTabs, onOpenRaw }: {
+export const CategorySidebar = memo(function CategorySidebar({ fileId, revision, counts, total, other, unfiled, selected, onSelect, onTabs, onOpenRaw }: {
   fileId: string;
   revision: number;
   /** Entries per tab, keyed by {@link tabKey}; null while Commodity.img loads. */
@@ -28,6 +29,8 @@ export const CategorySidebar = memo(function CategorySidebar({ fileId, revision,
   total: number | null;
   /** Entries whose SN names no tab in Category.img. */
   other: number;
+  /** Of those, the ones the client files by tab (SN 10000000-79999999): it won't open the Cash Shop with them. */
+  unfiled: number;
   selected: TabFilter;
   onSelect: (f: TabFilter) => void;
   /** Called with the tabs whenever they're loaded or edited. */
@@ -75,13 +78,15 @@ export const CategorySidebar = memo(function CategorySidebar({ fileId, revision,
   };
 
   const add = (category: number, name: string) => {
-    const before = new Set(table?.categories.flatMap((g) => g.subs.map((s) => s.entry)) ?? []);
+    // Entries are renumbered on every add, so the new one is told apart by its tab, not its entry name.
+    const before = new Set(table?.categories.flatMap((g) => g.subs.map((s) => tabKey(g.category, s.sub))) ?? []);
     return run(() => api.addCategorySub(fileId, { category, name }), [IMG], (r) => {
-      const added = r.table.categories.find((g) => g.category === category)?.subs.find((s) => !before.has(s.entry));
+      const added = r.table.categories.find((g) => g.category === category)?.subs.find((s) => !before.has(tabKey(category, s.sub)));
       if (!added) return;
       actions.toast("success", `Added "${added.name}" as sub category ${added.sub} of category ${category}. Its SNs are ${category * 100 + added.sub}xxxxx.`);
-      setFlash(added.entry);
-      setTimeout(() => setFlash((f) => (f === added.entry ? null : f)), 2500);
+      const key = tabKey(category, added.sub);
+      setFlash(key);
+      setTimeout(() => setFlash((f) => (f === key ? null : f)), 2500);
       onSelect({ category, sub: added.sub });
     });
   };
@@ -93,13 +98,13 @@ export const CategorySidebar = memo(function CategorySidebar({ fileId, revision,
     const n = count(tabKey(category, sub.sub)) ?? 0;
     const ok = await actions.confirm({
       title: `Delete "${sub.name}"?`,
-      body: `${n > 0 ? `${n.toLocaleString()} Commodity ${n === 1 ? "entry has an SN" : "entries have SNs"} in this tab and will have no tab to show in; they aren't deleted. ` : ""}Sub category ${sub.sub} of category ${category} (entry ${sub.entry}) is removed from the open file in memory only. Nothing on disk changes until you save, and you can discard all edits with Revert.`,
+      body: `${n > 0 ? `Its ${n.toLocaleString()} Commodity ${n === 1 ? "entry (SN" : "entries (SNs"} ${category * 100 + sub.sub}xxxxx) ${n === 1 ? "is" : "are"} deleted too: the client won't open the Cash Shop with an SN whose tab is missing. ` : ""}The remaining sub categories are renumbered so the client still reads them all. This changes the open file in memory only. Nothing on disk changes until you save, and you can discard all edits with Revert.`,
       confirmLabel: "Delete",
       danger: true,
     });
     if (!ok) return;
-    await run(() => api.deleteCategorySubs(fileId, [sub.entry]), [IMG], () => {
-      actions.toast("success", `Deleted "${sub.name}".`);
+    await run(() => api.deleteCategorySubs(fileId, [sub.entry]), [IMG, COMMODITY_IMG], (r) => {
+      actions.toast("success", `Deleted "${sub.name}"${r.deletedCommodity ? ` and its ${r.deletedCommodity.toLocaleString()} Commodity ${r.deletedCommodity === 1 ? "entry" : "entries"}` : ""}.`);
       if (selected && selected !== "other" && selected.category === category && selected.sub === sub.sub) onSelect({ category });
     });
   };
@@ -129,7 +134,7 @@ export const CategorySidebar = memo(function CategorySidebar({ fileId, revision,
                 if (v != null && v.trim() && v.trim() !== s.name) void rename(s, v);
               }} />
             ) : (
-              <Row key={s.entry} indent flash={flash === s.entry}
+              <Row key={s.entry} indent flash={flash === tabKey(g.category, s.sub)}
                 label={<><span title="CategorySub" className="w-5 shrink-0 text-right font-mono text-xs tabular-nums text-zinc-400">{s.sub}</span>{s.name || <i className="text-zinc-400">(no name)</i>}</>}
                 title={`SNs ${g.category * 100 + s.sub}xxxxx · ${IMG}/${s.entry}`}
                 count={count(tabKey(g.category, s.sub))} active={isSel(g.category, s.sub)} onClick={() => onSelect({ category: g.category, sub: s.sub })}
@@ -137,12 +142,16 @@ export const CategorySidebar = memo(function CategorySidebar({ fileId, revision,
                   {onOpenRaw && <IconButton title="Show in raw tree" onClick={() => onOpenRaw(`${IMG}/${s.entry}`)}><span className="px-0.5 text-[10px] font-semibold">Raw</span></IconButton>}
                   {!readOnly && <IconButton title="Rename" onClick={() => setEditing(s.entry)}><Pencil className="size-3.5" /></IconButton>}
                   {!readOnly && (
-                    <IconButton danger title={g.subs.length <= 1 ? "A category needs at least one sub category" : "Delete sub category"}
-                      disabled={g.subs.length <= 1} onClick={() => void remove(g.category, s)}><XMark className="size-3.5" /></IconButton>
+                    <IconButton danger title="Delete sub category and its Commodity entries" onClick={() => void remove(g.category, s)}><XMark className="size-3.5" /></IconButton>
                   )}
                 </>}
               />
             ))}
+            {g.subs.length === 0 && adding !== g.category && (
+              <p className="py-1 pl-6 pr-3 text-[11px] leading-4 text-zinc-400">
+                No sub categories; the client shows {g.category === 1 ? "“Recommended Items”" : "“The item is being prepared”"} here.
+              </p>
+            )}
             {adding === g.category && <AddInput category={g.category} onCancel={() => setAdding(null)} onAdd={async (name) => {
               const ok = await add(g.category, name);
               if (ok) setAdding(null);
@@ -153,8 +162,11 @@ export const CategorySidebar = memo(function CategorySidebar({ fileId, revision,
       })}
       {other > 0 && (
         <div className="mt-2">
-          <Row label={<span className="italic">Other SNs</span>} title="Entries whose SN names no tab in Category.img" count={other}
-            active={selected === "other"} onClick={() => onSelect("other")} strong />
+          <Row label={<span className={`italic ${unfiled > 0 ? "text-rose-600 dark:text-rose-400" : ""}`}>Other SNs</span>}
+            title={unfiled > 0
+              ? `${unfiled.toLocaleString()} of these have an SN in 10000000-79999999 whose tab is missing from Category.img; the client won't open the Cash Shop until they're moved or deleted.`
+              : "Entries whose SN names no tab in Category.img (outside 10000000-79999999 the client doesn't file them by tab)"}
+            count={other} active={selected === "other"} onClick={() => onSelect("other")} strong />
         </div>
       )}
     </nav>
