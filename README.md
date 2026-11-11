@@ -2,6 +2,8 @@
 
 Browse and edit MapleStory `.wz` files in your web browser.
 
+![WzBrowser web app](UIScreen.png)
+
 It comes in two parts:
 
 | Part | What it is |
