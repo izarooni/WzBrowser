@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import type { CategoryTable, CommodityCell, CommodityColumn, CommodityRow, CommodityRowsResult, CommodityTable, OpenedFile } from "../lib/api";
+import type { CategoryTable, CommodityCell, CommodityColumn, CommodityRow, CommodityRowResult, CommodityRowsResult, CommodityTable, OpenedFile } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { useNames } from "../lib/use-names";
 import { EDITABLE, INTEGER, invalid } from "../lib/values";
@@ -62,7 +62,7 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
   const [sort, setSort] = useState<{ col: number; desc: boolean } | null>(null);
   const [editing, setEditing] = useState<{ row: string; col: number } | null>(null);
   const [pending, setPending] = useState<Set<string>>(new Set());
-  const [flash, setFlash] = useState<string | null>(null);
+  const [flash, setFlash] = useState<Set<string> | null>(null);
   // Revisions caused by this view's own edits; the table is already up to date for those, so skip the refetch.
   const ownRevisions = useRef(new Set<number>());
 
@@ -380,24 +380,67 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
   const [donor, setDonor] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  /** The item ids typed into the add box, one per line; blank lines are skipped. Lines that aren't ids are reported. */
+  const parseItems = (text: string) => {
+    const ids: number[] = [];
+    const bad: number[] = [];
+    text.split(/\r?\n/).forEach((line, i) => {
+      const s = line.trim();
+      if (!s) return;
+      const n = Number(s);
+      if (/^\d+$/.test(s) && Number.isSafeInteger(n) && n > 0) ids.push(n); else bad.push(i + 1);
+    });
+    return { ids, bad };
+  };
+  const newItems = parseItems(newItem);
+
   const add = async (e: FormEvent) => {
     e.preventDefault();
-    const itemId = Number(newItem.trim());
-    if (!Number.isInteger(itemId) || itemId <= 0) { actions.toast("error", "Enter the item id to sell, e.g. 1002186."); return; }
+    const { ids, bad } = newItems;
+    if (bad.length) { actions.toast("error", `Not an item id on line${bad.length > 1 ? "s" : ""} ${bad.join(", ")}. Enter one item id per line, e.g. 1002186.`); return; }
+    if (ids.length === 0) { actions.toast("error", "Enter the item ids to sell, one per line, e.g. 1002186."); return; }
     setBusy(true);
+    // Each add renumbers the entries after it, so entry names go stale; the new rows are found again by SN.
+    const sns: string[] = [];
+    let last: CommodityRowResult | null = null;
+    let added = 0;
+    let failure: string | null = null;
+    for (const itemId of ids) {
+      try {
+        const r = await api.addCommodity(fileId, { itemId, donor, ...(addTab ?? {}) });
+        last = r;
+        added++;
+        const sn = r.row.cells[r.columns.findIndex((c) => c.name.toLowerCase() === "sn")]?.value;
+        if (sn) sns.push(sn);
+      } catch (err) {
+        failure = `Item ${itemId}: ${err instanceof Error ? err.message : String(err)}`;
+        break;
+      }
+    }
+    // Keep the ids not added yet in the box so they can be fixed and retried.
+    setNewItem(ids.slice(added).join("\n"));
     try {
-      const r = await api.addCommodity(fileId, { itemId, donor, ...(addTab ?? {}) });
-      // The new entry goes at the end of its tab's run, so the entries after it were renamed: reload.
-      const rows = await reload(r.file, [IMG]);
-      const sn = r.row.cells[r.columns.findIndex((c) => c.name.toLowerCase() === "sn")]?.value;
-      actions.toast("success", `Added entry ${r.row.name} for item ${itemId}${sn ? ` with SN ${sn}` : ""}.`);
-      setNewItem("");
-      setFilter("");
-      setSort(null);
-      if (!addTab) setTabFilter(null);
-      setFlash(r.row.name);
-      setTimeout(() => setFlash((f) => (f === r.row.name ? null : f)), 2500);
-      scrollToRow(r.row.name, addTab ? rows.filter(inTab) : rows);
+      if (last) {
+        // New entries go at the end of their tab's run, so the entries after them were renamed: reload.
+        const rows = await reload(last.file, [IMG]);
+        const snSet = new Set(sns);
+        const names = new Set(snCol < 0 ? [last.row.name] : rows.filter((r) => { const v = r.cells[snCol]?.value; return v != null && snSet.has(v); }).map((r) => r.name));
+        if (ids.length === 1 && !failure) {
+          actions.toast("success", `Added entry ${last.row.name} for item ${ids[0]}${sns[0] ? ` with SN ${sns[0]}` : ""}.`);
+        } else if (!failure) {
+          actions.toast("success", `Added ${ids.length.toLocaleString()} entries.`);
+        }
+        setFilter("");
+        setSort(null);
+        if (!addTab) setTabFilter(null);
+        setFlash(names);
+        setTimeout(() => setFlash((f) => (f === names ? null : f)), 2500);
+        const first = (addTab ? rows.filter(inTab) : rows).find((r) => names.has(r.name));
+        if (first) scrollToRow(first.name, addTab ? rows.filter(inTab) : rows);
+        if (failure) actions.toast("error", `Added ${added.toLocaleString()} of ${ids.length.toLocaleString()} entries, then stopped. ${failure}`);
+      } else if (failure) {
+        actions.toast("error", failure);
+      }
     } catch (err) {
       actions.toast("error", err instanceof Error ? err.message : String(err));
     } finally {
@@ -487,15 +530,20 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
         {adding && (
           <form onSubmit={add} className="flex flex-wrap items-end gap-4 border-b border-zinc-100 bg-zinc-50/70 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950/40">
             <label className="block w-44 space-y-1.5">
-              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Item id</span>
-              <input
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Item ids, one per line</span>
+              <textarea
                 autoFocus
+                rows={4}
                 value={newItem}
                 onChange={(e) => setNewItem(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Escape") setAdding(false); }}
-                inputMode="numeric"
-                placeholder="1002186"
-                className={`${inputClass} !rounded-lg !py-2 font-mono`}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setAdding(false);
+                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); }
+                }}
+                placeholder={"1002186\n1702155"}
+                title="One item id per line; blank lines are skipped. Ctrl+Enter to add."
+                aria-invalid={newItems.bad.length > 0}
+                className={`${inputClass} !rounded-lg !py-2 resize-y font-mono`}
               />
             </label>
             {!addTab && (
@@ -505,13 +553,13 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
               </label>
             )}
             <button type="submit" disabled={busy || !table} className={`${buttonPrimary} !rounded-lg !px-4 !py-2 !text-[13px]`}>
-              {busy ? "Adding…" : "Add"}
+              {busy ? "Adding…" : newItems.ids.length > 1 ? `Add ${newItems.ids.length.toLocaleString()}` : "Add"}
             </button>
             <p className="basis-full text-xs leading-5 text-zinc-500">
               {addTab
                 ? <>The SN goes in the selected tab{addTabName ? <> (<b className="font-semibold">{addTabName}</b>)</> : null}: {addTab.category}{String(addTab.sub).padStart(2, "0")}xxxxx, with the lowest free number.</>
                 : <>The SN is generated from the item's category: {donor ? "1" : "2"}<i>C</i>xxxxxx, where <i>C</i> is the Cash Shop tab and the rest is the lowest free number. Select a sub tab on the left to put the SN there instead.</>}
-              The new entry starts on sale for 4000 NX, 90 days, count 1, both genders, priority 99 and no tag; change any of it in the table.
+              Each new entry starts on sale for 4000 NX, 90 days, count 1, both genders, priority 99 and no tag; change any of it in the table.
             </p>
           </form>
         )}
@@ -557,7 +605,7 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
                       role="row"
                       style={{ position: "absolute", top: (start + i) * ROW_H, height: ROW_H, left: 0, right: 0, gridTemplateColumns: template }}
                       className={`group grid items-stretch border-b border-zinc-100 transition-colors dark:border-zinc-800/70 ${
-                        flash === row.name ? "bg-emerald-50 dark:bg-emerald-500/10"
+                        flash?.has(row.name) ?"bg-emerald-50 dark:bg-emerald-500/10"
                           : isSelected ? "bg-accent-50/70 dark:bg-accent-600/10"
                           : "hover:bg-zinc-50/80 dark:hover:bg-zinc-800/40"
                       }`}
