@@ -1,28 +1,24 @@
 # WzBrowser
 
-Browse and edit MapleStory `.wz` files in your web browser.
-
-![WzBrowser web app](UIScreen.png)
+Browse and edit `.wz` files in your web browser.
 
 It comes in two parts:
 
 | Part | What it is |
 |---|---|
 | **API** (`WzBrowser.Api` → `WzBrowser.exe`) | A small Windows program that reads and writes `.wz` files on your computer, using [MapleLib](https://github.com/lastbattle/MapleLib). |
-| **Web app** (`WzBrowser.Web`) | The page you use. It's a static site and talks to the API. |
+| **Web app** (`WzBrowser.Web`) | The page you use. It's a static site and talks to the API, can be hosted anywhere. |
 
 ## Quick start
 
 ```powershell
 git -c core.longpaths=true clone --recurse-submodules https://github.com/izarooni/WzBrowser.git
-cd WzBrowser
-build.bat                  # builds both into dist\
-dist\WzBrowser.exe         # start the API on http://127.0.0.1:5178
+build.bat                  # builds the API and web app into dist\
+dist\WzBrowser.exe         # starts the API on http://127.0.0.1:5178
+npm run dev                # in WzBrowser.Web: serves the web app on http://localhost:5173
 ```
 
-Then open the web app. `cd WzBrowser.Web` then `npm run dev` serves it on http://localhost:5173, or host `dist\wwwroot` anywhere. Click **Open file…** and pick a `.wz` file.
-
-You need the .NET 10 SDK and Node.js to build. MapleLib is a git submodule, and `build.bat` fetches it for you.
+Open the web app, click **Open file…** and pick a `.wz` file. You need the .NET 10 SDK and Node.js to build.
 
 ## Running the API
 
@@ -53,7 +49,6 @@ You can also set the root in `appsettings.json` next to the exe instead of on th
 ## Running the web app
 
 ```powershell
-cd WzBrowser.Web
 npm install
 npm run dev              # development server on http://localhost:5173
 npm run build            # static site in build/client
@@ -66,60 +61,39 @@ The web app connects to `http://127.0.0.1:5178` unless one of these changes it (
    ```json
    { "apiBase": "https://wz-api.example.com" }
    ```
-   `"/"` means "this site's own address" (for an API behind a proxy, see below).
 3. The address each user sets in the app (sliders icon). This option is hidden when the API has a library folder.
 
-If you host the web app on another address, start the API with `--allow-origin https://your.site`. Safari blocks HTTPS pages from calling `http://127.0.0.1`, so use it from `http://localhost` there. Serve `index.html` and `sw.js` with `Cache-Control: no-cache` so updates reach users. The project path must not contain `#`.
+Serve `index.html` and `sw.js` with `Cache-Control: no-cache` so updates reach users. The project path must not contain `#`.
 
-## Sharing a read-only library
+### Hosting the web app on a domain (`--allow-origin`)
 
-To let other people browse your files without changing them:
+The web app runs in each user's browser and calls the API directly, so the API only answers pages it trusts. `localhost` and `127.0.0.1` are always trusted. If you host `dist\wwwroot` somewhere else, for example behind nginx at `http://wz.example.com`, the browser marks every API request as coming from that address and the API refuses it until you allow it:
 
-1. **Pin the API to a folder.** Put this `dist\appsettings.json` next to the exe:
-   ```json
-   { "WzBrowser": { "Root": "D:\\Game\\Data" } }
-   ```
-2. **Host the web app**, `dist\wwwroot`, with a `config.json` in it that points the app at its own site:
-   ```json
-   { "apiBase": "/" }
-   ```
-3. **Forward `/api/` to the API** from the same web server, and make sure it sends `X-Forwarded-For`. For nginx:
-   ```nginx
-   location /api/ {
-       proxy_pass http://127.0.0.1:5178;
-       proxy_set_header X-Forwarded-For $remote_addr;
-   }
-   ```
-   IIS with URL Rewrite + ARR sends the header by itself.
+```powershell
+WzBrowser.exe --allow-origin http://wz.example.com
+```
 
-Anyone who comes through the proxy, or from another computer, is then **view only**:
-- they can open the quest and Commodity (Cash Shop) views and the library tabs;
-- they can't see the raw tree, and can't edit, save or close files;
-- the header shows *View only*.
+The value must match the address in the browser's address bar exactly: scheme (`http` vs `https`), domain, and port if it isn't the default (`http://wz.example.com:8080`). No path and no trailing slash is needed. Repeat the flag, or comma-separate `WZBROWSER_ORIGINS`, to allow several addresses (e.g. both `http://` and `https://`, or with and without `www.`).
 
-There is no login, so anyone who can reach the site can view the library. To make changes, use the web app on the server itself, pointed at `http://127.0.0.1:5178`.
+Chrome and Edge may ask each user to allow the site to reach devices on their local network the first time; they need to accept. Safari blocks `https://` pages from calling `http://127.0.0.1`, so Safari users need the site on `http://`.
 
 ## Using the web app
 
-Each opened file is a window on a canvas that you can pan by dragging or scrolling. You can move, resize and collapse the windows.
+![WzBrowser web app](commodity_editor.png)
+The **Commodity** tab of `Etc.wz` shows the Cash Shop list as an editable table.
 
-| Action | How |
-|---|---|
-| Copy a node to another window | Drag it onto a folder or image (hold **Shift** to move it instead) |
-| Copy / cut / paste / delete | **Ctrl+C / Ctrl+X / Ctrl+V / Delete** |
-| Edit a property | Click its name or value in the detail pane. **Enter** saves, **Esc** cancels. |
-| More actions | Right-click a node: new property, copy path, save as PNG, export all images |
-| Replace an image | Select a canvas, then **Replace…** in the detail pane (or drop an image file on its preview). Pick the quality to store it in next to the button. |
-| Save | **Ctrl+S** |
-| Discard edits | Undo button in the window's title bar |
 
-**Edits stay in memory until you save. Saving always writes a new file** (`Map.edited.wz`, `Map.edited2.wz`, …), never touching the original.
+![Moving windows around the canvas](moveable_canvas.gif)
 
-Some files get views of their own (a **Raw tree** tab is always next to them):
-- **Quests** (`Quest.wz` or `QuestData`): a searchable quest list with requirements, dialogue and rewards. Item, NPC, mob, map and skill names link to their files and show a picture on hover.
-- **Commodity** (`Etc.wz`): the Cash Shop list as an editable table. You can sort, search, select a range with Shift-click, add entries (SN generated as in [CashCommodities](https://github.com/izarooni/CashCommodities)) and delete them.
+Each opened file is a window on a canvas. Pan by dragging the background (or with the middle mouse button anywhere), and move, resize or collapse windows.
 
-**Convert to XML…** in the header writes `.wz` files out as server XML.
+![Dragging nodes between files and deleting them](drag_drop_delete.gif)
+
+Drag a node from one window onto a folder or image in another to copy it (hold **Shift** to move it instead). Select a node and press **Delete** to remove it. Edits stay in memory until you press **Ctrl+S**, which always writes a new file (`Map.edited.wz`, …) and leaves the original untouched.
+
+![Exporting every image under a node](extract_multiple_images.gif)
+
+Right-click a node and choose **Export all images** to save every canvas under it as PNGs in one go.
 
 ## Using it from Claude (MCP)
 
