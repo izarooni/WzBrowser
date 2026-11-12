@@ -3,7 +3,7 @@ import type { ObjRef, WzNode } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { baseName, canPaste, joinPath, parentPath } from "../lib/paths";
 import { dnd, useActions, useWorkspaceData, type ClipItem, type TreeEvent } from "../lib/workspace";
-import { ArrowUp, ChevronRight, Copy, Document, Download, ExclamationTriangle, Folder, Music, Photo, Search, XMark } from "./icons";
+import { ArrowUp, ChevronRight, ChevronsIn, Copy, Document, Download, ExclamationTriangle, Folder, Music, Photo, Search, XMark } from "./icons";
 import { EDITABLE, invalid } from "../lib/values";
 import { IMAGE_QUALITIES, formatName, loadImageQuality, saveImageQuality } from "../lib/image-quality";
 import { download } from "../lib/download";
@@ -63,6 +63,7 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
   const [creating, setCreating] = useState<string | null>(null);
 
   const rowRefs = useRef(new Map<string, HTMLElement>());
+  const treeRef = useRef<HTMLDivElement>(null);
   const revealRef = useRef<string | null>(null);
   const hoverTimer = useRef<{ path: string; id: ReturnType<typeof setTimeout> } | null>(null);
   const levelsRef = useRef(levels);
@@ -249,6 +250,17 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
 
   // Also restore when the filter is emptied by typing rather than with the clear button or Esc.
   useEffect(() => { if (!needle) restoreFolders(); }, [needle, restoreFolders]);
+
+  // Close every folder except the way to the selected node, which stays centred; with no visible selection, go back to the top.
+  const collapseAll = () => {
+    filterOpened.current = new Set();
+    const sel = selected != null && nodeRows.some((r) => r.path === selected) ? selected : null;
+    const keep = new Set<string>();
+    if (sel != null) for (let a = parentPath(sel); a; a = parentPath(a)) keep.add(a);
+    setExpanded(keep);
+    if (sel != null) centerRef.current = sel;
+    else treeRef.current?.scrollTo({ top: 0 });
+  };
 
   const select = (path: string, focus = false) => {
     setSelected(path);
@@ -437,8 +449,8 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
     <div className="@container flex min-h-0 flex-1 flex-col">
     <div className="flex min-h-0 flex-1 flex-col @xl:flex-row">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="border-b border-zinc-100 p-3 dark:border-zinc-800">
-          <label className="relative block">
+        <div className="flex items-center gap-2 border-b border-zinc-100 p-3 dark:border-zinc-800">
+          <label className="relative block min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
             <input
               value={filter}
@@ -460,9 +472,20 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
               </button>
             )}
           </label>
+          <button
+            type="button"
+            onClick={collapseAll}
+            disabled={expanded.size === 0}
+            aria-label="Collapse all"
+            title="Collapse all"
+            className="grid size-9 shrink-0 place-items-center rounded-lg text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 disabled:pointer-events-none disabled:opacity-40 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+          >
+            <ChevronsIn className="size-5" />
+          </button>
         </div>
 
         <div
+          ref={treeRef}
           role="tree"
           aria-label={`${file?.name ?? "WZ"} contents`}
           tabIndex={0}
