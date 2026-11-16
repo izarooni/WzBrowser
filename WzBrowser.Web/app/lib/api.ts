@@ -31,13 +31,26 @@ export interface OpenedFile {
   dirty: boolean;
   savedTo: string | null;
   /** "quest" for a quest archive (QuestInfo.img + Check.img at the root, or a modular QuestData with one {id}.img per quest);
-   * "etc" when Commodity.img is at the root. */
-  kind: "quest" | "etc" | "generic";
+   * "etc" when Commodity.img is at the root; "canvas" for a modular install's picture file (Data/Mob/_Canvas/_Canvas_000.wz). */
+  kind: "quest" | "etc" | "canvas" | "generic";
   /** Changes whenever the file's contents change, so views know to refetch. */
   revision: number;
 }
 
 export interface QuestSummary { id: number; name: string }
+
+/**
+ * One thumbnail of a _Canvas file. `path`: the thing it stands for (an .img, a skill, an item, an animation); `label`: the
+ * text under it (the .img's name, else the name from String, else the path); `title`: more for the tooltip; `picture`:
+ * the canvas to show; `frames`: set when it's an animation, each frame with its delay in milliseconds.
+ */
+export interface GalleryItem {
+  path: string;
+  label: string;
+  title: string | null;
+  picture: string;
+  frames: { picture: string; delay: number }[] | null;
+}
 
 /** A property and everything below it, in file order. */
 export interface PropTree { name: string; type: NodeType; value: string | null; children: PropTree[] | null }
@@ -282,6 +295,11 @@ export function createApi(base: string) {
     /** Paths of nodes named like `q`: all directories/.imgs plus properties up to `depth` levels inside each .img. */
     search: (id: string, query: string, depth = 3) => request<string[]>(`/api/files/${id}/search?q=${q(query)}&depth=${depth}`),
     quests: (id: string) => request<QuestSummary[]>(`/api/files/${id}/quests`),
+    /**
+     * A _Canvas file's thumbnails: each thing's first stand, move or fly frame, else its icon or iconRaw; other numbered
+     * series of pictures as animations. `truncated`: there were too many, and the rest were left out.
+     */
+    gallery: (id: string) => request<{ items: GalleryItem[]; truncated: boolean }>(`/api/files/${id}/gallery`),
     quest: (id: string, questId: number) => request<QuestDetail>(`/api/files/${id}/quests/${questId}`),
     questChain: (id: string, questId: number) => request<QuestChain>(`/api/files/${id}/quests/${questId}/chain`),
     commodity: (id: string) => request<CommodityTable>(`/api/files/${id}/commodity`),

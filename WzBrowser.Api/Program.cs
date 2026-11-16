@@ -218,6 +218,8 @@ api.MapGet("/files/{id}/preview", (string id, string kind, int refId, HttpContex
     ctx.Response.Headers.CacheControl = "private, max-age=300";
     return Results.File(png, "image/png");
 });
+// A _Canvas file as thumbnails: each thing's first stand, move or fly frame, else its icon; other numbered series animate.
+api.MapGet("/files/{id}/gallery", (string id, WzService wz) => wz.Gallery(id));
 api.MapGet("/files/{id}/png", (string id, string path, WzService wz) =>
     Results.File(wz.Png(id, path), "image/png"));
 // Every canvas under a node (a folder, .img or property), as PNGs in a zip laid out like the tree.

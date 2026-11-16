@@ -17,7 +17,8 @@ public record NodeDto(
 
 /// <param name="Kind">"quest" for a quest archive (QuestInfo.img + Check.img at the root, or the modular QuestData with
 /// one {id}.img per quest), "etc" for one with
-/// Commodity.img at the root (Etc.wz), otherwise "generic".</param>
+/// Commodity.img at the root (Etc.wz), "canvas" for a modular install's picture file
+/// (Data/Mob/_Canvas/_Canvas_000.wz), otherwise "generic".</param>
 /// <param name="Revision">Changes whenever the file's contents change (paste, delete, revert) so views know to refetch.</param>
 public record OpenedFileDto(string Id, string Name, string Path, string Encryption, int Version, int ChildCount, bool Dirty, string? SavedTo, string Kind, long Revision);
 
@@ -177,7 +178,7 @@ public sealed partial class WzService(string? root = null)
         {
             Kind = modularQuests || root.GetImageByName("QuestInfo.img") != null && root.GetImageByName("Check.img") != null ? "quest"
                 : root.GetImageByName(CommodityImg) != null ? "etc"
-                : "generic",
+                : IsCanvasFile(path) ? "canvas" : "generic",
             ModularQuests = modularQuests,
             Hidden = hidden,
         };
