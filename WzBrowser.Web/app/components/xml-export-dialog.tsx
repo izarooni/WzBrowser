@@ -201,7 +201,7 @@ const formatSize = (bytes: number | null) => {
   return `${n >= 10 || i === 0 ? Math.round(n) : n.toFixed(1)} ${units[i]}`;
 };
 
-/** Browses the disk; folders open, .wz files tick. Ticked files stay ticked when moving to another folder. */
+/** Browses the disk; folders open, .wz files and .ms packs tick. Ticked files stay ticked when moving to another folder. */
 function FolderSource({ open, selected, toggle, suggestOutput }: SourceProps) {
   const { api } = useConnection();
   const [listing, setListing] = useState<FsListing | null>(null);
@@ -275,7 +275,7 @@ function FolderSource({ open, selected, toggle, suggestOutput }: SourceProps) {
             <CheckRow checked={selected.has(f.path)} onClick={() => toggle(f.path)} label={f.name} hint={formatSize(f.size)} />
           </li>
         ))}
-        {listing && dirs.length === 0 && files.length === 0 && <li className="px-4 py-10 text-center text-sm text-zinc-500">No folders or .wz files here.</li>}
+        {listing && dirs.length === 0 && files.length === 0 && <li className="px-4 py-10 text-center text-sm text-zinc-500">No folders, .wz files or .ms packs here.</li>}
       </ul>
     </div>
   );
@@ -329,7 +329,7 @@ function LibrarySource({ open, selected, toggle, suggestOutput }: SourceProps) {
               <CheckRow checked={selected.has(f.path)} onClick={() => toggle(f.path)} label={labels.get(f.path)!} title={f.name} hint={formatSize(f.size)} />
             </li>
           ))}
-          {visible.length === 0 && <li className="px-4 py-10 text-center text-sm text-zinc-500">{files.length === 0 ? "The library folder has no .wz files." : "No files match."}</li>}
+          {visible.length === 0 && <li className="px-4 py-10 text-center text-sm text-zinc-500">{files.length === 0 ? "The library folder has no .wz files or .ms packs." : "No files match."}</li>}
         </ul>
       )}
     </div>

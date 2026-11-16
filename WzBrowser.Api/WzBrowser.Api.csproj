@@ -9,6 +9,7 @@
     <RootNamespace>WzBrowser.Api</RootNamespace>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <ApplicationIcon>..\WzBrowser.Web\public\favicon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <!-- `dotnet publish` produces one self-contained exe that runs anywhere on win-x64. -->

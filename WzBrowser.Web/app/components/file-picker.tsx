@@ -14,6 +14,23 @@ const writeLastDir = (dir: string) => {
   try { localStorage.setItem(LAST_DIR_KEY, dir); } catch { /* not persisted */ }
 };
 
+// Folders files were opened from, most recent first. Kept in the browser only; the server never sees them.
+const RECENT_DIRS_KEY = "wzbrowser.recentDirs";
+const MAX_RECENT_DIRS = 10;
+
+const readRecentDirs = (): string[] => {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(RECENT_DIRS_KEY) ?? "[]");
+    return Array.isArray(v) ? v.filter((d): d is string => typeof d === "string") : [];
+  } catch { return []; }
+};
+const writeRecentDirs = (dirs: string[]) => {
+  try { localStorage.setItem(RECENT_DIRS_KEY, JSON.stringify(dirs)); } catch { /* not persisted */ }
+};
+const sameDir = (a: string, b: string) => a.replace(/[\\/]+$/, "").toLowerCase() === b.replace(/[\\/]+$/, "").toLowerCase();
+/** "D:\Games\Data\Mob.wz" -> "D:\Games\Data". */
+const parentDir = (path: string) => path.replace(/[\\/][^\\/]*$/, "") || path;
+
 const formatSize = (bytes: number | null) => {
   if (bytes == null) return "";
   const units = ["B", "KB", "MB", "GB"];
@@ -67,6 +84,21 @@ function FolderPicker({ open, onClose, onOpened }: PickerProps) {
   const [loading, setLoading] = useState(false);
   const [opening, setOpening] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [recentDirs, setRecentDirs] = useState<string[]>([]);
+  const [showRecent, setShowRecent] = useState(false);
+
+  useEffect(() => { if (open) setRecentDirs(readRecentDirs()); }, [open]);
+
+  const rememberDir = (dir: string) => {
+    const next = [dir, ...readRecentDirs().filter((d) => !sameDir(d, dir))].slice(0, MAX_RECENT_DIRS);
+    writeRecentDirs(next);
+    setRecentDirs(next);
+  };
+  const forgetDir = (dir: string) => {
+    const next = readRecentDirs().filter((d) => !sameDir(d, dir));
+    writeRecentDirs(next);
+    setRecentDirs(next);
+  };
 
   const go = useCallback(async (path: string): Promise<boolean> => {
     setLoading(true);
@@ -97,6 +129,7 @@ function FolderPicker({ open, onClose, onOpened }: PickerProps) {
     setError(null);
     try {
       const file = await api.open(path, encryption);
+      rememberDir(parentDir(path));
       onOpened(file);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -107,9 +140,10 @@ function FolderPicker({ open, onClose, onOpened }: PickerProps) {
 
   const submitPath = (e: FormEvent) => {
     e.preventDefault();
+    setShowRecent(false);
     const p = pathInput.trim();
     if (!p) return go("");
-    if (/\.wz$/i.test(p)) openFile(p);
+    if (/\.(wz|ms)$/i.test(p)) openFile(p);
     else go(p);
   };
 
@@ -124,7 +158,7 @@ function FolderPicker({ open, onClose, onOpened }: PickerProps) {
           <div className="flex items-start justify-between gap-6 p-8 pb-6">
             <div className="space-y-2">
               <DialogTitle className="text-xl font-semibold">Open a WZ file</DialogTitle>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">Browse to a game folder, or paste a path to a .wz file.</p>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">Browse to a game folder, or paste a path to a .wz file or .ms pack.</p>
             </div>
             <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800">
               <XMark className="size-5" />
@@ -142,13 +176,53 @@ function FolderPicker({ open, onClose, onOpened }: PickerProps) {
               >
                 <ArrowUp className="size-5" />
               </button>
-              <input
-                value={pathInput}
-                onChange={(e) => setPathInput(e.target.value)}
-                placeholder="D:\Games\MapleStory"
-                spellCheck={false}
-                className={`${inputClass} font-mono`}
-              />
+              <div className="relative min-w-0 flex-1">
+                <input
+                  value={pathInput}
+                  onChange={(e) => setPathInput(e.target.value)}
+                  onFocus={() => setShowRecent(true)}
+                  onClick={() => setShowRecent(true)}
+                  onBlur={() => setShowRecent(false)}
+                  onKeyDown={(e) => {
+                    // Close the list first; a second Escape closes the dialog.
+                    if (e.key === "Escape" && showRecent && recentDirs.length > 0) { e.preventDefault(); e.stopPropagation(); setShowRecent(false); }
+                  }}
+                  placeholder="D:\Games\MapleStory"
+                  spellCheck={false}
+                  autoComplete="off"
+                  className={`${inputClass} font-mono`}
+                />
+                {showRecent && recentDirs.length > 0 && (
+                  // mousedown is cancelled so clicking an item doesn't blur the input (which would hide the list first).
+                  <div onMouseDown={(e) => e.preventDefault()}
+                    className="absolute inset-x-0 top-full z-10 mt-1.5 rounded-xl border border-zinc-200 bg-white p-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+                    <p className="px-3 pb-1.5 pt-1 text-xs font-medium text-zinc-400">Recent folders</p>
+                    <ul className="max-h-72 overflow-y-auto">
+                      {recentDirs.map((dir) => (
+                        <li key={dir} className="group flex items-center rounded-lg hover:bg-accent-50 dark:hover:bg-zinc-800">
+                          <button
+                            type="button"
+                            title={dir}
+                            onClick={() => { setShowRecent(false); go(dir).then((ok) => { if (!ok) forgetDir(dir); }); }}
+                            className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left text-sm"
+                          >
+                            <Folder className="size-4 shrink-0 text-amber-500" />
+                            <span className="truncate font-mono">{dir}</span>
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Remove ${dir} from recent folders`}
+                            onClick={() => forgetDir(dir)}
+                            className="mr-1 rounded-md p-1.5 text-zinc-400 opacity-0 transition hover:bg-zinc-200 hover:text-zinc-700 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
+                          >
+                            <XMark className="size-3.5" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
               <button type="submit" className={buttonSecondary}>Go</button>
             </form>
 
@@ -171,7 +245,7 @@ function FolderPicker({ open, onClose, onOpened }: PickerProps) {
             ) : loading && !listing ? (
               <div className="space-y-2 p-2">{Array.from({ length: 6 }, (_, i) => <div key={i} className="skeleton h-12 rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
             ) : listing && listing.entries.length === 0 ? (
-              <p className="px-4 py-16 text-center text-sm text-zinc-500">No folders or .wz files here.</p>
+              <p className="px-4 py-16 text-center text-sm text-zinc-500">No folders, .wz files or .ms packs here.</p>
             ) : (
               <ul className="space-y-1">
                 {listing?.entries.map((entry) => (
@@ -201,8 +275,11 @@ function FolderPicker({ open, onClose, onOpened }: PickerProps) {
   );
 }
 
-/** "Quest/QuestData/QuestData_000.wz" -> "QuestData": the file name without its extension or split-archive suffix. */
-const baseLabel = (name: string) => name.split("/").pop()!.replace(/\.wz$/i, "").replace(/_\d{3}$/, "");
+/**
+ * "Quest/QuestData/QuestData_000.wz" -> "QuestData", "Packs/Mob_00000.ms" -> "Mob": the file name without its extension
+ * or split-archive / pack number.
+ */
+const baseLabel = (name: string) => name.split("/").pop()!.replace(/\.(wz|ms)$/i, "").replace(/_(\d{3}|\d{5})$/, "");
 
 /** Short button labels. Names that would repeat (each folder's _Canvas) get their parent folders until they don't. */
 export function libraryLabels(files: LibraryFile[]): Map<string, string> {
@@ -308,7 +385,7 @@ function LibraryPicker({ open, onClose, onOpened }: PickerProps) {
               {!files ? (
                 <div className="space-y-2">{Array.from({ length: 3 }, (_, i) => <div key={i} className="skeleton h-12 rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
               ) : files.length === 0 ? (
-                <p className="text-sm text-zinc-500">{browseOnly ? "The library folder has no quest archives or Etc.wz." : "The library folder has no .wz files."}</p>
+                <p className="text-sm text-zinc-500">{browseOnly ? "The library folder has no quest archives or Etc.wz." : "The library folder has no .wz files or .ms packs."}</p>
               ) : (
                 <ul className="-mx-2 max-h-[50dvh] space-y-1 overflow-y-auto px-2">
                   {visible.map((f) => (

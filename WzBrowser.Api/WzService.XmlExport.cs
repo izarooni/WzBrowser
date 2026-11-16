@@ -90,9 +90,9 @@ public sealed partial class WzService
         public volatile string? Error;
     }
 
-    /// <summary>"Mob_001.wz" -> "Mob.wz", so a modular file's parts land in one folder.</summary>
+    /// <summary>"Mob_001.wz" or "Mob_00000.ms" -> "Mob.wz", so a modular file's parts and packs land in one folder.</summary>
     private static string OutputFolderName(string path) =>
-        System.Text.RegularExpressions.Regex.Replace(System.IO.Path.GetFileNameWithoutExtension(path), @"_\d{3}$", "") + ".wz";
+        System.Text.RegularExpressions.Regex.Replace(System.IO.Path.GetFileNameWithoutExtension(path), @"_(\d{3}|\d{5})$", "") + ".wz";
 
     /// <summary>A modular file's index ({name}.wz beside {name}_000.wz) holds no data of its own.</summary>
     private static bool IsIndexStub(string path) =>

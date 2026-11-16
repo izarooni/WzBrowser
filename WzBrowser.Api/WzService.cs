@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using MapleLib.WzLib;
+using MapleLib.WzLib.MSFile;
 using MapleLib.WzLib.Util;
 using MapleLib.WzLib.WzProperties;
 
@@ -68,10 +69,13 @@ public sealed partial class WzService(string? root = null)
         return files.OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    /// <summary>Every .wz file under <paramref name="folder"/> except a modular folder's index stub, named relative to it.</summary>
+    /// <summary>
+    /// Every .wz file and .ms pack under <paramref name="folder"/> except a modular folder's index stub, named relative to it.
+    /// </summary>
     private static IEnumerable<LibraryFile> WzFilesIn(string folder) =>
         Directory.EnumerateFiles(folder, "*.wz", SearchOption.AllDirectories)
             .Where(f => !File.Exists(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(f)!, System.IO.Path.GetFileNameWithoutExtension(f) + "_000.wz")))
+            .Concat(Directory.EnumerateFiles(folder, "*.ms", SearchOption.AllDirectories))
             .Select(f => new LibraryFile(System.IO.Path.GetRelativePath(folder, f).Replace('\\', '/'), f, new FileInfo(f).Length));
 
     /// <summary>Quest archives and Etc.wz have a view of their own; other files only have the raw tree.</summary>
@@ -163,6 +167,46 @@ public sealed partial class WzService(string? root = null)
             return Describe(id, existing);
         }
 
+        var (file, version) = IsMsPack(path) ? (OpenMsPack(path), WzMapleVersion.BMS) : OpenWz(path, encryption);
+
+        var root = file.WzDirectory;
+        var modularQuests = IsModularQuestArchive(root);
+        var entry = new Entry(file, path, version.ToString())
+        {
+            Kind = modularQuests || root.GetImageByName("QuestInfo.img") != null && root.GetImageByName("Check.img") != null ? "quest"
+                : root.GetImageByName(CommodityImg) != null ? "etc"
+                : "generic",
+            ModularQuests = modularQuests,
+            Hidden = hidden,
+        };
+        _files[id] = entry;
+        return Describe(id, entry);
+    }
+
+    /// <summary>A newer client's .ms pack (Data/Packs/Mob_00000.ms): images encrypted per entry, always BMS inside.</summary>
+    internal static bool IsMsPack(string path) => path.EndsWith(".ms", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Reads a whole .ms pack into memory as a WzFile with its images at the root. The key comes from the file name, so
+    /// a renamed pack can't be read.
+    /// </summary>
+    private static WzFile OpenMsPack(string path)
+    {
+        try
+        {
+            using var stream = File.OpenRead(path);
+            using var ms = new WzMsFile(stream, System.IO.Path.GetFileName(path), path);
+            return ms.LoadAsWzFile();
+        }
+        catch (Exception ex) when (ex is not IOException)
+        {
+            throw new InvalidDataException($"Could not open MS pack ({ex.Message}).");
+        }
+    }
+
+    /// <summary>Opens a .wz file, detecting its encryption when <paramref name="encryption"/> is null or "auto".</summary>
+    private static (WzFile File, WzMapleVersion Version) OpenWz(string path, string? encryption)
+    {
         if (WzTool.IsListFile(path))
             throw new InvalidDataException("This is a legacy list-format file (e.g. List.wz), not a standard WZ archive.");
 
@@ -202,19 +246,7 @@ public sealed partial class WzService(string? root = null)
             }
         }
         if (file == null) throw new InvalidDataException($"Could not open WZ file ({lastError}).");
-
-        var root = file.WzDirectory;
-        var modularQuests = IsModularQuestArchive(root);
-        var entry = new Entry(file, path, version.ToString())
-        {
-            Kind = modularQuests || root.GetImageByName("QuestInfo.img") != null && root.GetImageByName("Check.img") != null ? "quest"
-                : root.GetImageByName(CommodityImg) != null ? "etc"
-                : "generic",
-            ModularQuests = modularQuests,
-            Hidden = hidden,
-        };
-        _files[id] = entry;
-        return Describe(id, entry);
+        return (file, version);
     }
 
     // Real entry names are plain identifiers ("Cap", "01002008.img", "UIWindow.img", "Bgm00.img").
@@ -576,6 +608,7 @@ public sealed partial class WzService(string? root = null)
         lock (entry.Lock)
         lock (SaveLock)
         {
+            if (IsMsPack(entry.Path)) return SaveMsPack(id, entry, outPath);
             string target;
             if (string.IsNullOrWhiteSpace(outPath))
             {
@@ -614,6 +647,49 @@ public sealed partial class WzService(string? root = null)
             entry.SavedTo = target;
             return new SaveResult(target, new FileInfo(target).Length, Describe(id, entry));
         }
+    }
+
+    /// <summary>
+    /// Writes an .ms pack to a NEW file. Its key is derived from the file name, so a renamed copy couldn't be put back in
+    /// place; by default the copy keeps the original name in an "edited" folder beside it (edited2, ... when taken).
+    /// </summary>
+    private SaveResult SaveMsPack(string id, Entry entry, string? outPath)
+    {
+        var name = System.IO.Path.GetFileName(entry.Path);
+        string target;
+        if (string.IsNullOrWhiteSpace(outPath))
+        {
+            var dir = System.IO.Path.GetDirectoryName(entry.Path)!;
+            target = System.IO.Path.Combine(dir, "edited", name);
+            for (var n = 2; File.Exists(target); n++)
+                target = System.IO.Path.Combine(dir, $"edited{n}", name);
+        }
+        else
+        {
+            target = System.IO.Path.GetFullPath(outPath);
+            if (!IsMsPack(target)) throw new InvalidDataException("An .ms pack can only be saved as another .ms file.");
+            if (!InRoot(target)) throw new UnauthorizedAccessException("Files can only be saved inside this server's library folder.");
+            if (File.Exists(target)) throw new InvalidDataException($"'{target}' already exists; this app never overwrites files.");
+        }
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(target)!);
+
+        using (var output = new FileStream(target, FileMode.CreateNew, FileAccess.ReadWrite))
+        using (var pack = new WzMsFile(output, System.IO.Path.GetFileName(target), target, leaveOpen: true, isSavingFile: true))
+            pack.Save(entry.File);
+
+        // Read it back, so a pack that can't be decrypted is caught now and later edits build on what was written.
+        WzFile saved;
+        try { saved = OpenMsPack(target); }
+        catch (InvalidDataException ex)
+        {
+            throw new InvalidDataException($"Saved to '{target}', but it couldn't be read back ({ex.Message}). Reopen the file before editing further.");
+        }
+        entry.File.Dispose();
+        entry.File = saved;
+        entry.Revision = NextRevision();
+        entry.Dirty = false;
+        entry.SavedTo = target;
+        return new SaveResult(target, new FileInfo(target).Length, Describe(id, entry));
     }
 
     /// <summary>Discards in-memory edits by reloading the file from disk.</summary>

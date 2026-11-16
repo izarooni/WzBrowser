@@ -177,7 +177,7 @@ api.MapGet("/fs", (string? path, WzService wz) =>
         if ((d.Attributes & (FileAttributes.Hidden | FileAttributes.System)) != 0) continue;
         entries.Add(new FsEntry(d.Name, d.FullName, true, null));
     }
-    foreach (var f in dir.EnumerateFiles("*.wz").OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase))
+    foreach (var f in dir.EnumerateFiles("*.wz").Concat(dir.EnumerateFiles("*.ms")).OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase))
         entries.Add(new FsEntry(f.Name, f.FullName, false, f.Length));
 
     return new FsListing(full, dir.Parent?.FullName ?? "", entries);
