@@ -240,8 +240,8 @@ export function createApi(base: string) {
     base,
     /**
      * `library`: the server is pinned to a folder, so files come from `library()` and `fs` is refused.
-     * `readOnly`: this computer isn't the server's own, so it may view but not change anything.
-     * `browseOnly`: both, so only quest archives and Etc.wz are offered, through their own views (no raw tree).
+     * `readOnly`: the server was started with --read-only, so it may be viewed but not changed.
+     * `browseOnly`: read only and pinned to a library folder, so only quest archives and Etc.wz are offered, through their own views (no raw tree).
      * `skills`: the library has skill data, so `skills()` has something to show.
      * `mobs`: the library has Mob data, so `mobs()` has something to show.
      * `mobLocations`: the library's Etc has MobLocation.img, so `mobLocations()` has something to show.

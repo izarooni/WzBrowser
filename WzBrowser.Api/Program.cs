@@ -2,27 +2,26 @@ using System.Net;
 using System.Net.Sockets;
 using WzBrowser.Api;
 
-// Usage: WzBrowser.exe [--host 127.0.0.1] [--port 5178] [--allow-origin https://my.site]... [--root D:\Game\Data]
+// Usage: WzBrowser.exe [--host 127.0.0.1] [--port 5178] [--allow-origin https://my.site]... [--root D:\Game\Data] [--read-only]
 //   env: WZBROWSER_PORT, WZBROWSER_ORIGINS (comma separated), WZBROWSER_ROOT
-//   appsettings.json next to the exe: { "WzBrowser": { "Root": "D:\\Game\\Data" } }
-// With a root, only the .wz files under it can be opened (picked from a list), and the disk can't be browsed. Callers
-// on other computers, or reaching it through a reverse proxy (how a hosted web app shares it), may view but not change.
+// With a root, only the .wz files under it can be opened (picked from a list), and the disk can't be browsed. With
+// --read-only, files can be viewed but not changed, by anyone.
 var argList = args.ToList();
 IEnumerable<string> ArgValues(string name) =>
     argList.Select((a, i) => (a, i)).Where(t => t.a == name && t.i + 1 < argList.Count).Select(t => argList[t.i + 1]);
+var readOnly = argList.Contains("--read-only");
 
-// Content root = the exe's folder, so appsettings.json is found there whatever the working directory.
-var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = args, ContentRootPath = AppContext.BaseDirectory });
+var builder = WebApplication.CreateBuilder(args);
 builder.Logging.SetMinimumLevel(LogLevel.Warning);
 
-var root = new[] { ArgValues("--root").FirstOrDefault(), Environment.GetEnvironmentVariable("WZBROWSER_ROOT"), builder.Configuration["WzBrowser:Root"] }
+var root = new[] { ArgValues("--root").FirstOrDefault(), Environment.GetEnvironmentVariable("WZBROWSER_ROOT") }
     .FirstOrDefault(r => !string.IsNullOrWhiteSpace(r));
-var wzService = new WzService(root);
+var wzService = new WzService(root) { ReadOnly = readOnly };
 if (wzService.Root != null && !Directory.Exists(wzService.Root))
     Console.WriteLine($"Warning: library folder '{wzService.Root}' doesn't exist.");
 builder.Services.AddSingleton(wzService);
 // MCP tools at /mcp for Claude and other agents, over the same open files (see WzMcpTools). Stateless: every bit of
-// state already lives in WzService. Callers on other computers or behind a proxy are refused below (it's all POSTs).
+// state already lives in WzService. With --read-only, its editing tools are refused (see WzMcpTools.Write).
 // Results go to a model, so keep them compact: no "-style escaping and no null fields.
 builder.Services.AddMcpServer().WithHttpTransport(o => o.Stateless = true).WithTools<WzMcpTools>(
     new System.Text.Json.JsonSerializerOptions(ModelContextProtocol.McpJsonUtilities.DefaultOptions)
@@ -84,37 +83,34 @@ app.Use(async (ctx, next) =>
 
 app.UseCors();
 
-// Other computers may look but not touch: the open files and their unsaved edits are shared by everyone, and saving
-// writes to the server's disk. Opening files and following links only add files to the shared list, so they're allowed.
-// A reverse proxy connects from loopback, but it says whom it forwards for in these headers.
-string[] proxyHeaders = ["X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "Forwarded", "X-Real-IP", "Via", "X-ARR-LOG-ID"];
-bool IsRemote(HttpContext ctx) =>
-    ctx.Connection.RemoteIpAddress is { } ip && !IPAddress.IsLoopback(ip)
-    || proxyHeaders.Any(ctx.Request.Headers.ContainsKey);
-var remoteAllowed = new System.Text.RegularExpressions.Regex(@"^/api/files(/[^/]+/(lookup|ref/open))?/?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+// With --read-only, everyone (this computer too) may look but not touch: nothing is edited, saved or converted. Opening
+// files and following links only add files to the shared list, so they're allowed. MCP is all POSTs, so it passes here
+// and WzMcpTools refuses its editing tools itself.
+var readOnlyAllowed = new System.Text.RegularExpressions.Regex(@"^(/api/files(/[^/]+/(lookup|ref/open))?/?|/mcp(/.*)?)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 app.Use(async (ctx, next) =>
 {
     var method = ctx.Request.Method;
-    if (IsRemote(ctx) && !(HttpMethods.IsGet(method) || HttpMethods.IsHead(method) || HttpMethods.IsOptions(method))
-        && !(HttpMethods.IsPost(method) && remoteAllowed.IsMatch(ctx.Request.Path.Value ?? "")))
+    if (readOnly && !(HttpMethods.IsGet(method) || HttpMethods.IsHead(method) || HttpMethods.IsOptions(method))
+        && !(HttpMethods.IsPost(method) && readOnlyAllowed.IsMatch(ctx.Request.Path.Value ?? "")))
     {
         ctx.Response.StatusCode = 403;
-        await ctx.Response.WriteAsJsonAsync(new { error = "View only: changes can only be made on the server's own computer." });
+        await ctx.Response.WriteAsJsonAsync(new { error = "This server is read only." });
         return;
     }
     await next();
 });
 
-// A library viewed from another computer shows only the quest and Commodity views: no raw tree, node values, images
-// or sounds, and no links into other files (they open in the raw tree). Name lookups and link previews stay.
-bool BrowseOnly(HttpContext ctx) => wzService.Root != null && IsRemote(ctx);
+// A read only library (--root with --read-only) shows everyone, this computer too, only the quest and Commodity views:
+// no raw tree, node values, images or sounds, and no links into other files (they open in the raw tree). Name lookups
+// and link previews stay.
+var browseOnly = wzService.Root != null && readOnly;
 var rawRoutes = new System.Text.RegularExpressions.Regex(@"^/api/files/[^/]+/(children|search|node|png|pngs|sound|objref|ref/open)/?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 app.Use(async (ctx, next) =>
 {
-    if (BrowseOnly(ctx) && rawRoutes.IsMatch(ctx.Request.Path.Value ?? ""))
+    if (browseOnly && rawRoutes.IsMatch(ctx.Request.Path.Value ?? ""))
     {
         ctx.Response.StatusCode = 403;
-        await ctx.Response.WriteAsJsonAsync(new { error = "Only the quest and Commodity views are available from here." });
+        await ctx.Response.WriteAsJsonAsync(new { error = "Only the quest and Commodity views are available." });
         return;
     }
     await next();
@@ -123,13 +119,13 @@ app.Use(async (ctx, next) =>
 var api = app.MapGroup("/api");
 
 // `library` tells the web app this server is pinned to a folder: it then lists /library instead of browsing /fs,
-// and keeps its API address fixed. `readOnly`: this caller is on another computer (or behind a proxy) and may only view.
-// `browseOnly`: both, so only quest archives and Etc.wz are offered, and only through their own views.
+// and keeps its API address fixed. `readOnly`: the server runs with --read-only, so everyone may only view.
+// `browseOnly`: a read only library, so only quest archives and Etc.wz are offered, and only through their own views.
 api.MapGet("/health", (WzService wz, HttpContext ctx) =>
-    new { status = "ok", port, version = "1.0.0", library = wz.Root != null, readOnly = IsRemote(ctx), browseOnly = BrowseOnly(ctx), skills = wz.HasSkills, mobs = wz.HasMobs, mobLocations = wz.HasMobLocations, maps = wz.HasMaps, items = wz.HasItems, npcs = wz.HasNpcQuests });
+    new { status = "ok", port, version = "1.0.0", library = wz.Root != null, readOnly, browseOnly, skills = wz.HasSkills, mobs = wz.HasMobs, mobLocations = wz.HasMobLocations, maps = wz.HasMaps, items = wz.HasItems, npcs = wz.HasNpcQuests });
 
 // ---- the files a pinned server offers ----
-api.MapGet("/library", (WzService wz, HttpContext ctx) => wz.Library(browsableOnly: BrowseOnly(ctx)));
+api.MapGet("/library", (WzService wz, HttpContext ctx) => wz.Library(browsableOnly: browseOnly));
 // Every job's skills across the library (Skill.wz or a Packs/Skill_*.ms pack, with String's names), and their icons.
 api.MapGet("/skills", (WzService wz) => wz.Skills());
 api.MapGet("/skills/{id:int}/icon", (int id, HttpContext ctx, WzService wz) => LibraryPng(wz.SkillIcon(id), ctx));
@@ -184,8 +180,8 @@ api.MapGet("/fs", (string? path, WzService wz) =>
 });
 
 // ---- WZ files ----
-api.MapGet("/files", (WzService wz, HttpContext ctx) => wz.List(browsableOnly: BrowseOnly(ctx)));
-api.MapPost("/files", (OpenRequest req, WzService wz, HttpContext ctx) => wz.Open(req.Path, req.Encryption, browsableOnly: BrowseOnly(ctx)));
+api.MapGet("/files", (WzService wz, HttpContext ctx) => wz.List(browsableOnly: browseOnly));
+api.MapPost("/files", (OpenRequest req, WzService wz, HttpContext ctx) => wz.Open(req.Path, req.Encryption, browsableOnly: browseOnly));
 api.MapDelete("/files/{id}", (string id, WzService wz) => wz.Close(id) ? Results.NoContent() : Results.NotFound());
 api.MapGet("/files/{id}/children", (string id, string? path, WzService wz) => wz.Children(id, path));
 api.MapGet("/files/{id}/search", (string id, string q, int? depth, WzService wz) => wz.Search(id, q, depth ?? 3));
@@ -259,7 +255,8 @@ app.MapGet("/",() => Results.Text($"WzBrowser API listening on http://{host}:{po
 
 Console.WriteLine($"WzBrowser API listening on http://{host}:{port}  (Ctrl+C to quit)");
 Console.WriteLine($"MCP server: http://{host}:{port}/mcp");
-if (wzService.Root != null) Console.WriteLine($"Serving only the .wz files in {wzService.Root} (view only through a proxy or from other computers)");
+if (wzService.Root != null) Console.WriteLine($"Serving only the .wz files in {wzService.Root}");
+if (readOnly) Console.WriteLine("Read only: files can be viewed but not changed");
 app.Run();
 
 static int FindFreePort(string host, int preferred)

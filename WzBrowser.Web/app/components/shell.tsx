@@ -166,14 +166,14 @@ export function AppShell({ children }: { children: ReactNode }) {
           </Link>
           <div className="flex items-center gap-3">
             {readOnly && (
-              <span title="Changes can only be made on the server's own computer" className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+              <span title="The server was started with --read-only, so files can be viewed but not changed" className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
                 View only
               </span>
             )}
             {/* Browse-only viewers see every file as a tab, so there's nothing to open or copy. */}
             {!browseOnly && <ClipboardChip />}
             {!browseOnly && <button type="button" className={`${buttonPrimary} !py-2`} disabled={status !== "online"} onClick={openPicker}>Open file…</button>}
-            {/* Converting writes to the server's disk, which only its own computer may do. */}
+            {/* Converting writes to the server's disk, which a read only server never does. */}
             {!readOnly && <button type="button" className={`${buttonSecondary} !py-2`} disabled={status !== "online"} onClick={() => setXmlOpen(true)}>Convert to XML…</button>}
             <StatusPill onClick={() => setSettingsOpen(true)} />
             <button

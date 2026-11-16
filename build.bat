@@ -2,7 +2,7 @@
 rem Builds both programs and copies them into dist:
 rem   API -> dist\WzBrowser.exe (Release, single self-contained exe)
 rem   Web -> dist\wwwroot (static site)
-rem Files put in dist by hand, such as appsettings.json and wwwroot\config.json, are left alone.
+rem Files put in dist by hand, such as wwwroot\config.json, are left alone.
 setlocal
 cd /d "%~dp0"
 

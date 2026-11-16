@@ -15,9 +15,9 @@ interface Connection {
    * Kept from the last successful check, so it survives the server briefly going offline.
    */
   library: boolean;
-  /** This computer may only view: the server is another machine, and edits can only be made on its own. */
+  /** The server was started with --read-only: files may be viewed but not changed. */
   readOnly: boolean;
-  /** A pinned server viewed from another computer: only the quest and Commodity views, never the raw tree. */
+  /** A read only pinned server: only the quest and Commodity views, never the raw tree. */
   browseOnly: boolean;
   /** The library has skill data to show (a pinned server only). */
   skills: boolean;

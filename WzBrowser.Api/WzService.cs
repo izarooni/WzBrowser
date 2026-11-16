@@ -49,6 +49,8 @@ public sealed partial class WzService(string? root = null)
 {
     /// <summary>The library folder this server is pinned to, or null when any file on disk may be opened.</summary>
     public string? Root { get; } = root == null ? null : System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(root));
+    /// <summary>Started with --read-only: files may be opened and viewed, but nothing edited, saved or closed.</summary>
+    public bool ReadOnly { get; init; }
 
     /// <summary>True when <paramref name="fullPath"/> may be read or written: always, unless the server is pinned to a folder.</summary>
     internal bool InRoot(string fullPath) =>

@@ -40,18 +40,18 @@ public sealed class WzMcpTools(WzService wz)
     [McpServerTool(Name = "wz_close", Destructive = true)]
     [Description("Closes an open file. Unsaved edits are lost.")]
     public string Close([Description("File id.")] string file) =>
-        Run(() => wz.Close(file) ? "Closed." : throw new KeyNotFoundException($"No open file with id '{file}'."));
+        Write(() => wz.Close(file) ? "Closed." : throw new KeyNotFoundException($"No open file with id '{file}'."));
 
     [McpServerTool(Name = "wz_save")]
     [Description("Writes the file with its edits to a NEW .wz file (Name.edited.wz, Name.edited2.wz, ... beside it, or `path`). Never overwrites anything. The open file then continues from the new one.")]
     public SaveResult Save(
         [Description("File id.")] string file,
         [Description("Optional full path for the new file; must not exist.")] string? path = null) =>
-        Run(() => wz.Save(file, path));
+        Write(() => wz.Save(file, path));
 
     [McpServerTool(Name = "wz_revert", Destructive = true)]
     [Description("Discards all unsaved edits to a file by reloading it from disk.")]
-    public OpenedFileDto Revert([Description("File id.")] string file) => Run(() => wz.Revert(file));
+    public OpenedFileDto Revert([Description("File id.")] string file) => Write(() => wz.Revert(file));
 
     // ---------------------------------------------------------------- reading
 
@@ -142,7 +142,7 @@ public sealed class WzMcpTools(WzService wz)
         [Description("The operations, applied in order (max 5000).")] List<BatchOp> ops,
         [Description("Apply and check every op, report, then undo everything.")] bool dryRun = false,
         [Description("Return each op's resulting path and node (default: only a failure is reported).")] bool report = false) =>
-        Run(() => wz.Batch(ops, dryRun, report));
+        Write(() => wz.Batch(ops, dryRun, report));
 
     // ---------------------------------------------------------------- views
 
@@ -162,7 +162,11 @@ public sealed class WzMcpTools(WzService wz)
     [McpServerTool(Name = "wz_set_commodity")]
     [Description("Sets many Commodity.img values at once: each {entry, property, type, value}. A property an entry lacks is added with that type.")]
     public CommodityRowsResult SetCommodity([Description("File id.")] string file, List<CommoditySetRequest> sets) =>
-        Run(() => wz.SetCommodity(file, sets));
+        Write(() => wz.SetCommodity(file, sets));
+
+    /// <summary>Runs an editing tool, unless the server was started with --read-only.</summary>
+    private T Write<T>(Func<T> action) =>
+        wz.ReadOnly ? throw new McpException("This server is read only: files can be viewed but not changed.") : Run(action);
 
     /// <summary>Hands the reason for a failure back to the model; other exception messages would be hidden.</summary>
     private static T Run<T>(Func<T> action)

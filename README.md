@@ -23,7 +23,7 @@ Open the web app, click **Open file…** and pick a `.wz` file. You need the .NE
 ## Running the API
 
 ```powershell
-WzBrowser.exe [--port 5178] [--host 127.0.0.1] [--root FOLDER] [--allow-origin URL]...
+WzBrowser.exe [--port 5178] [--host 127.0.0.1] [--root FOLDER] [--read-only] [--allow-origin URL]...
 ```
 
 | Argument | Environment variable | Default | What it does |
@@ -31,6 +31,7 @@ WzBrowser.exe [--port 5178] [--host 127.0.0.1] [--root FOLDER] [--allow-origin U
 | `--port N` | `WZBROWSER_PORT` | `5178` | Port to listen on. If it's busy, the next free one is used. |
 | `--host ADDR` | | `127.0.0.1` | Address to listen on. |
 | `--root FOLDER` | `WZBROWSER_ROOT` | none | Pin the server to a library folder (see below). |
+| `--read-only` | | off | Files can be viewed but not changed, by anyone, including on this computer and through MCP. |
 | `--allow-origin URL` | `WZBROWSER_ORIGINS` (comma separated) | none | Let a web app hosted at that address call the API. You can repeat it. `localhost` is always allowed. |
 
 ### Library folder (`--root`)
@@ -39,12 +40,6 @@ Without a root, the web app can browse your whole disk to open files. With a roo
 - only `.wz` files inside that folder can be opened or saved to;
 - **Open file…** shows a searchable list of them;
 - extra tabs appear for the whole library: Skills, Mobs, Maps, Items and NPCs.
-
-You can also set the root in `appsettings.json` next to the exe instead of on the command line:
-
-```json
-{ "WzBrowser": { "Root": "D:\\Game\\Data" } }
-```
 
 ## Running the web app
 
