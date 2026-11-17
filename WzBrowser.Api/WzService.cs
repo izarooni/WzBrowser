@@ -140,6 +140,8 @@ public sealed partial class WzService(string? root = null)
         /// Opened internally (e.g. Item.wz for a tooltip image) and not listed until a link actually opens it.
         /// </summary>
         public bool Hidden { get; set; }
+        /// <summary>An .ms pack's layout, so a save writes its images back to the same paths with its other entries.</summary>
+        public MsPackLayout? MsLayout { get; set; }
         /// <summary>Equipment id -> "Category/00000000.img", built the first time an equip is looked up.</summary>
         public Dictionary<int, string>? EquipIndex { get; set; }
     }
@@ -170,7 +172,8 @@ public sealed partial class WzService(string? root = null)
             return Describe(id, existing);
         }
 
-        var (file, version) = IsMsPack(path) ? (OpenMsPack(path), WzMapleVersion.BMS) : OpenWz(path, encryption);
+        MsPackLayout? msLayout = null;
+        var (file, version) = IsMsPack(path) ? (OpenMsPack(path, out msLayout), WzMapleVersion.BMS) : OpenWz(path, encryption);
 
         var root = file.WzDirectory;
         var modularQuests = IsModularQuestArchive(root);
@@ -181,6 +184,7 @@ public sealed partial class WzService(string? root = null)
                 : IsCanvasFile(path) ? "canvas" : "generic",
             ModularQuests = modularQuests,
             Hidden = hidden,
+            MsLayout = msLayout,
         };
         _files[id] = entry;
         return Describe(id, entry);
@@ -189,17 +193,22 @@ public sealed partial class WzService(string? root = null)
     /// <summary>A newer client's .ms pack (Data/Packs/Mob_00000.ms): images encrypted per entry, always BMS inside.</summary>
     internal static bool IsMsPack(string path) => path.EndsWith(".ms", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>What a pack's WzFile doesn't hold: each image's entry path, and the entries that aren't images.</summary>
+    private sealed record MsPackLayout(Dictionary<WzImage, string> EntryNames, List<KeyValuePair<string, byte[]>> NonImageEntries);
+
     /// <summary>
     /// Reads a whole .ms pack into memory as a WzFile with its images at the root. The key comes from the file name, so
     /// a renamed pack can't be read.
     /// </summary>
-    private static WzFile OpenMsPack(string path)
+    private static WzFile OpenMsPack(string path, out MsPackLayout layout)
     {
         try
         {
             using var stream = File.OpenRead(path);
             using var ms = new WzMsFile(stream, System.IO.Path.GetFileName(path), path);
-            return ms.LoadAsWzFile();
+            var file = ms.LoadAsWzFile();
+            layout = new MsPackLayout(new(ms.ImageEntryNames, ReferenceEqualityComparer.Instance), [.. ms.NonImageEntries]);
+            return file;
         }
         catch (Exception ex) when (ex is not IOException)
         {
@@ -678,17 +687,19 @@ public sealed partial class WzService(string? root = null)
 
         using (var output = new FileStream(target, FileMode.CreateNew, FileAccess.ReadWrite))
         using (var pack = new WzMsFile(output, System.IO.Path.GetFileName(target), target, leaveOpen: true, isSavingFile: true))
-            pack.Save(entry.File);
+            pack.Save(entry.File, entry.MsLayout?.EntryNames, entry.MsLayout?.NonImageEntries);
 
         // Read it back, so a pack that can't be decrypted is caught now and later edits build on what was written.
         WzFile saved;
-        try { saved = OpenMsPack(target); }
+        MsPackLayout savedLayout;
+        try { saved = OpenMsPack(target, out savedLayout); }
         catch (InvalidDataException ex)
         {
             throw new InvalidDataException($"Saved to '{target}', but it couldn't be read back ({ex.Message}). Reopen the file before editing further.");
         }
         entry.File.Dispose();
         entry.File = saved;
+        entry.MsLayout = savedLayout;
         entry.Revision = NextRevision();
         entry.Dirty = false;
         entry.SavedTo = target;
