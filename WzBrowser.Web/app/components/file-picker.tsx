@@ -87,17 +87,17 @@ function usePeeks(entries: FsEntry[] | undefined): Map<string, PeekState> {
 
 /** The small line under a file: its first root names, then how many more. */
 function PeekLine({ peek, pending }: { peek: PeekState | undefined; pending: boolean }) {
-  if (peek === "outdated") return <span className="block text-[11px] leading-4 text-zinc-400 italic">Restart WzBrowser.exe (rebuilt) to preview contents</span>;
+  if (peek === "outdated") return <span className="block text-[11px] leading-4 text-zinc-300 italic dark:text-zinc-600">Restart WzBrowser.exe (rebuilt) to preview contents</span>;
   if (pending) return <span className="block h-3.5 w-2/5 animate-pulse rounded bg-zinc-100 dark:bg-zinc-800" />;
-  if (peek === null) return <span className="block text-[11px] leading-4 text-zinc-400 italic">Couldn't read its contents</span>;
-  if (!peek || peek.count === 0) return <span className="block text-[11px] leading-4 text-zinc-400 italic">Empty</span>;
+  if (peek === null) return <span className="block text-[11px] leading-4 text-zinc-300 italic dark:text-zinc-600">Couldn't read its contents</span>;
+  if (!peek || peek.count === 0) return <span className="block text-[11px] leading-4 text-zinc-300 italic dark:text-zinc-600">Empty</span>;
   const shown = peek.names.map((n) => n.replace(/\.img$/i, ""));
   const more = peek.count - shown.length;
   return (
     <span title={peek.names.join("\n") + (more > 0 ? `\n… ${more} more` : "")}
-      className="block truncate font-mono text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">
+      className="block truncate font-mono text-[11px] leading-4 text-zinc-400 dark:text-zinc-500">
       {shown.join(" · ")}
-      {more > 0 && <span className="text-zinc-400 dark:text-zinc-500"> · +{more}</span>}
+      {more > 0 && <span className="text-zinc-300 dark:text-zinc-600"> · +{more}</span>}
     </span>
   );
 }
