@@ -235,6 +235,22 @@ api.MapGet("/files/{id}/pngs", (string id, string? path, WzService wz) =>
     var (zip, name) = wz.ExportPngs(id, path);
     return Results.File(zip, "application/zip", name);
 });
+// The reverse: a zip of folders and PNGs (an export, or one made by hand) put into a node; the body is the zip itself.
+// Folders become directories, .imgs and sub-properties (created when missing), PNGs canvases, and each folder's .props
+// restores what the export recorded. `quality` as for PUT png below; by default each picture keeps its exported format.
+api.MapPost("/files/{id}/import", async (string id, string? path, string? quality, HttpContext ctx, WzService wz) =>
+{
+    // A whole file's export is far over the default 30 MB body limit.
+    if (ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
+        limit.MaxRequestBodySize = 4L << 30;
+    // ZipArchive needs to seek, so the upload goes to a temp file first.
+    await using var temp = new FileStream(Path.GetTempFileName(), FileMode.Create, FileAccess.ReadWrite, FileShare.None, 1 << 16,
+        FileOptions.DeleteOnClose | FileOptions.Asynchronous);
+    await ctx.Request.Body.CopyToAsync(temp);
+    if (temp.Length == 0) throw new ArgumentException("No zip was uploaded.");
+    temp.Position = 0;
+    return wz.ImportZip(id, path, temp, quality);
+});
 // Replaces a canvas' picture; the request body is the image file itself (PNG, JPEG, BMP or GIF).
 // `quality`: the pixel format to store: bgra8888 (lossless, the default), argb4444, argb1555, rgb565, dxt3, dxt5
 // (Big Bang+ clients only), or keep. What each loses is documented at the top of WzService.CanvasUpload.cs.

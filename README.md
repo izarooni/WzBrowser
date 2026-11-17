@@ -88,7 +88,7 @@ Drag a node from one window onto a folder or image in another to copy it (hold *
 
 ![Exporting every image under a node](extract_multiple_images.gif)
 
-Right-click a node and choose **Export all images** to save every canvas under it as PNGs in one go.
+Right-click a node and choose **Export all images** to save every canvas under it as PNGs in one go, in a zip laid out like the tree. Each folder also gets a small `.props` file with everything else in it (delay, origin, the pixel format, other values, real names), so the zip can go back in: right-click a node and choose **Import zip…**. Folders become .imgs and sub-properties of the same name, created if missing; PNGs become canvases. A zip you make by hand works too: without a `.props`, folders become sub-properties and new pictures are stored lossless.
 
 ## Using it from Claude (MCP)
 

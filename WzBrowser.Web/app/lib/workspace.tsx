@@ -71,6 +71,8 @@ export interface TreeEvent {
     reveal?: string;
     /** Drop everything and reload from the root (after a revert). */
     reset?: boolean;
+    /** Re-fetch this folder and every folder under it that has been fetched (after an import). */
+    reloadUnder?: string;
 }
 
 /** The node being dragged right now. Drag data can't be read during dragover, so it's kept here. */
@@ -101,6 +103,8 @@ interface Actions {
     createNode: (fileId: string, parent: string, create: NodeCreate) => Promise<boolean>;
     /** Replaces a canvas' picture with an image file. */
     setCanvasImage: (fileId: string, path: string, image: Blob, quality?: string) => Promise<boolean>;
+    /** Imports a zip of folders and PNGs into a node, then reports what changed and what was skipped. */
+    importZip: (fileId: string, path: string, zip: File) => Promise<void>;
     save: (fileId: string) => Promise<void>;
     revert: (fileId: string) => Promise<void>;
     subscribe: (fileId: string, cb: (e: TreeEvent) => void) => () => void;
@@ -352,6 +356,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         }
     }, [api, upsert, emit, toast]);
 
+    const importZip = useCallback<Actions["importZip"]>(async (fileId, path, zip) => {
+        toast("info", `Importing “${zip.name}”…`);
+        try {
+            const r = await api.importZip(fileId, path, zip);
+            upsert(r.file);
+            emit(fileId, { reloadUnder: path });
+            const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+            const done = [r.images && plural(r.images, "image"), r.properties && plural(r.properties, "value"), r.created && `${plural(r.created, "new node")}`]
+                .filter(Boolean).join(", ") || "nothing changed";
+            if (!r.warnings.length) toast("success", `Imported “${zip.name}”: ${done}.`);
+            else toast(r.images + r.properties + r.created ? "info" : "error",
+                `Imported “${zip.name}”: ${done}. Skipped: ${r.warnings.slice(0, 3).join(" ")}${r.warnings.length > 3 ? ` …and ${r.warnings.length - 3} more.` : ""}`);
+        } catch (e) {
+            toast("error", errText(e));
+        }
+    }, [api, upsert, emit, toast]);
+
     const save = useCallback(async (fileId: string) => {
         try {
             const r = await api.save(fileId);
@@ -389,9 +410,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setPan: (x, y) => dispatch({ type: "pan", x, y }),
         tidy: () => dispatch({ type: "tidy" }),
         openPicker: () => setPickerOpen(true),
-        paste, deleteNode, editNode, createNode, setCanvasImage, save, revert, subscribe, toast,
+        paste, deleteNode, editNode, createNode, setCanvasImage, importZip, save, revert, subscribe, toast,
         reveal, takePendingReveal, showWindow, followRef, edited, confirm,
-    }), [openFile, closeWindow, paste, deleteNode, editNode, createNode, setCanvasImage, save, revert, subscribe, toast, reveal, takePendingReveal, showWindow, followRef, edited, confirm]);
+    }), [openFile, closeWindow, paste, deleteNode, editNode, createNode, setCanvasImage, importZip, save, revert, subscribe, toast, reveal, takePendingReveal, showWindow, followRef, edited, confirm]);
 
     return (
         <ActionsCtx.Provider value={actions}>

@@ -119,6 +119,8 @@ export interface NodeEdit { name?: string; value?: string }
 export interface NodeCreate { name: string; type: string; value?: string }
 /** `path` is where the property is now, which changes on a rename. */
 export interface NodeEditResult { path: string; node: WzNode; file: OpenedFile }
+/** What an import changed: canvases given a picture, values set, nodes created; `warnings` lists what was skipped (at most 50). */
+export interface ImportResult { path: string; file: OpenedFile; images: number; properties: number; created: number; warnings: string[] }
 
 export interface FsEntry { name: string; path: string; isDirectory: boolean; size: number | null }
 export interface FsListing { path: string; parent: string | null; entries: FsEntry[] }
@@ -398,6 +400,17 @@ export function createApi(base: string) {
          * Replaces a canvas' picture with this image file (PNG, JPEG, BMP or GIF), stored as `quality` (an IMAGE_QUALITIES
          * value; lossless when left out). Removes any _inlink/_outlink.
          */
+        /**
+         * Puts a zip of folders and PNGs (an "Export all images" zip, or one made by hand) into a node: folders become
+         * directories, .imgs and sub-properties (created when missing), PNGs canvases, and each folder's .props restores
+         * delay, origin, pixel formats and the other values. `quality` as for setPng; by default the exported format.
+         */
+        importZip: (id: string, path: string, zip: Blob, quality?: string) =>
+            request<ImportResult>(`/api/files/${id}/import?path=${q(path)}${quality ? `&quality=${q(quality)}` : ""}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/zip" },
+                body: zip,
+            }),
         setPng: (id: string, path: string, image: Blob, quality?: string) =>
             request<NodeEditResult>(`/api/files/${id}/png?path=${q(path)}${quality ? `&quality=${q(quality)}` : ""}`, {
                 method: "PUT",

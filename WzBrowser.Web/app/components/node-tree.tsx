@@ -3,7 +3,7 @@ import type { ObjRef, WzNode } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { baseName, canPaste, joinPath, parentPath } from "../lib/paths";
 import { dnd, useActions, useWorkspaceData, type ClipItem, type TreeEvent } from "../lib/workspace";
-import { ArrowUp, ChevronRight, ChevronsIn, Copy, Document, Download, ExclamationTriangle, Folder, Music, Photo, Search, XMark } from "./icons";
+import { ArrowUp, ChevronRight, ChevronsIn, Copy, Document, Download, ExclamationTriangle, Folder, Music, Photo, Search, Upload, XMark } from "./icons";
 import { EDITABLE, invalid } from "../lib/values";
 import { IMAGE_QUALITIES, formatName, loadImageQuality, saveImageQuality } from "../lib/image-quality";
 import { download } from "../lib/download";
@@ -60,6 +60,9 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
     const closeMenu = useCallback(() => setMenu(null), []);
     /** The image or property the "New property" dialog adds to, while it's open. */
     const [creating, setCreating] = useState<string | null>(null);
+    /** The zip picker, and the node the zip it picks goes into. */
+    const importInput = useRef<HTMLInputElement>(null);
+    const importTarget = useRef("");
 
     const rowRefs = useRef(new Map<string, HTMLElement>());
     const treeRef = useRef<HTMLDivElement>(null);
@@ -116,6 +119,10 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
         }
         // Only folders already fetched need refreshing; the rest load fresh when opened.
         e.reload?.forEach((p) => { if (levelsRef.current[p]) loadLevel(p, true); });
+        if (e.reloadUnder != null) {
+            const under = e.reloadUnder;
+            Object.keys(levelsRef.current).forEach((p) => { if (!under || p === under || p.startsWith(under + "/")) loadLevel(p, true); });
+        }
         if (e.reveal) {
             const target = e.reveal;
             revealRef.current = target;
@@ -325,6 +332,11 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
         catch (e) { ws.toast("error", `Couldn't export the images in “${name}”: ${e instanceof Error ? e.message : String(e)}`); }
     };
 
+    const importZip = (path: string) => {
+        importTarget.current = path;
+        importInput.current?.click();
+    };
+
     const saveCanvas = async (path: string) => {
         try { await download(api.pngUrl(fileId, path, file?.revision), imageFileName(path)); }
         catch (e) { ws.toast("error", e instanceof Error ? e.message : String(e)); }
@@ -354,6 +366,8 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
         const saves: MenuItem[] = [];
         if (node.type === "canvas") saves.push({ label: "Save PNG", icon: <Download className="size-4" />, onSelect: () => void saveCanvas(path) });
         if (node.hasChildren && node.type !== "canvas") saves.push({ label: "Export all images", icon: <Photo className="size-4" />, onSelect: () => void exportImages(path) });
+        if (!readOnly && IMPORT_TARGETS.has(node.type))
+            saves.push({ label: "Import zip…", icon: <Upload className="size-4" />, onSelect: () => importZip(path) });
         if (saves.length) items.push(...(items.length ? [{ kind: "separator" } as const] : []), ...saves);
 
         if (path && !readOnly) items.push({ kind: "separator" }, { label: "Delete", danger: true, shortcut: "Del", onSelect: () => void ws.deleteNode(fileId, path, baseName(path)) });
@@ -569,6 +583,12 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
             />
         </div>
         {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.path)} onClose={closeMenu} />}
+        <input ref={importInput} type="file" accept=".zip,application/zip,application/x-zip-compressed" hidden
+            onChange={(e) => {
+                const zip = e.target.files?.[0];
+                e.target.value = "";
+                if (zip) void ws.importZip(fileId, importTarget.current, zip);
+            }} />
         <NewPropertyDialog
             open={creating != null}
             parentName={creating ?? ""}
@@ -777,6 +797,8 @@ function imageFileName(path: string): string {
 
 /** Nodes a property can be added to. */
 const PROPERTY_HOLDERS = new Set(["image", "sub", "convex", "canvas"]);
+/** What "Import zip…" can put a zip into: the file, its folders, .imgs and the properties that hold others. */
+const IMPORT_TARGETS = new Set(["file", "directory", "image", "sub", "convex", "canvas"]);
 
 /** Directories and images can't be renamed (MapleLib indexes them by name); everything below an image can. */
 const NOT_PROPERTY = new Set(["file", "directory", "image"]);
