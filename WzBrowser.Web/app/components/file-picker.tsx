@@ -1,6 +1,6 @@
 import { Dialog, DialogBackdrop, DialogPanel, DialogTitle, Listbox, ListboxButton, ListboxOption, ListboxOptions } from "@headlessui/react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { ENCRYPTIONS, type FsListing, type LibraryFile, type OpenedFile } from "../lib/api";
+import { ENCRYPTIONS, type FilePeek, type FsEntry, type FsListing, type LibraryFile, type OpenedFile } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { ArrowUp, Check, ChevronUpDown, Document, Folder, XMark } from "./icons";
 import { buttonSecondary, inputClass } from "./ui";
@@ -38,6 +38,56 @@ const formatSize = (bytes: number | null) => {
   while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
   return `${n >= 10 || i === 0 ? Math.round(n) : n.toFixed(1)} ${units[i]}`;
 };
+
+// Root names already peeked, by path and size, so going back to a folder shows them at once.
+const peekCache = new Map<string, FilePeek | null>();
+const peekKey = (e: FsEntry) => `${e.path}|${e.size}`;
+const PEEK_CONCURRENCY = 4;
+
+/**
+ * The root names of the listing's files, fetched a few at a time in the background. Only each file's directory table is
+ * read, so this stays quick even for a folder of big _Canvas files. null: the file couldn't be read.
+ */
+function usePeeks(entries: FsEntry[] | undefined): Map<string, FilePeek | null> {
+  const { api } = useConnection();
+  const [peeks, setPeeks] = useState<Map<string, FilePeek | null>>(new Map());
+
+  useEffect(() => {
+    const files = (entries ?? []).filter((e) => !e.isDirectory);
+    const known = new Map(files.filter((f) => peekCache.has(peekKey(f))).map((f) => [f.path, peekCache.get(peekKey(f))!]));
+    setPeeks(known);
+    const queue = files.filter((f) => !peekCache.has(peekKey(f)));
+    let cancelled = false;
+    const worker = async () => {
+      for (let f = queue.shift(); f && !cancelled; f = queue.shift()) {
+        let peek: FilePeek | null = null;
+        try { peek = await api.peek(f.path); } catch { /* shown as unreadable */ }
+        peekCache.set(peekKey(f), peek);
+        if (!cancelled) { const path = f.path; setPeeks((m) => new Map(m).set(path, peek)); }
+      }
+    };
+    for (let i = 0; i < PEEK_CONCURRENCY; i++) void worker();
+    return () => { cancelled = true; };
+  }, [entries, api]);
+
+  return peeks;
+}
+
+/** The small line under a file: its first root names, then how many more. */
+function PeekLine({ peek, pending }: { peek: FilePeek | null | undefined; pending: boolean }) {
+  if (pending) return <span className="block h-3.5 w-2/5 animate-pulse rounded bg-zinc-100 dark:bg-zinc-800" />;
+  if (peek === null) return <span className="block text-[11px] leading-4 text-zinc-400 italic">Couldn't read its contents</span>;
+  if (!peek || peek.count === 0) return <span className="block text-[11px] leading-4 text-zinc-400 italic">Empty</span>;
+  const shown = peek.names.map((n) => n.replace(/\.img$/i, ""));
+  const more = peek.count - shown.length;
+  return (
+    <span title={peek.names.join("\n") + (more > 0 ? `\n… ${more} more` : "")}
+      className="block truncate font-mono text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">
+      {shown.join(" · ")}
+      {more > 0 && <span className="text-zinc-400 dark:text-zinc-500"> · +{more}</span>}
+    </span>
+  );
+}
 
 export function EncryptionSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
@@ -86,6 +136,7 @@ function FolderPicker({ open, onClose, onOpened }: PickerProps) {
   const [error, setError] = useState<string | null>(null);
   const [recentDirs, setRecentDirs] = useState<string[]>([]);
   const [showRecent, setShowRecent] = useState(false);
+  const peeks = usePeeks(listing?.entries);
 
   useEffect(() => { if (open) setRecentDirs(readRecentDirs()); }, [open]);
 
@@ -247,19 +298,22 @@ function FolderPicker({ open, onClose, onOpened }: PickerProps) {
             ) : listing && listing.entries.length === 0 ? (
               <p className="px-4 py-16 text-center text-sm text-zinc-500">No folders, .wz files or .ms packs here.</p>
             ) : (
-              <ul className="space-y-1">
+              <ul>
                 {listing?.entries.map((entry) => (
                   <li key={entry.path}>
                     <button
                       type="button"
                       disabled={opening !== null}
                       onClick={() => (entry.isDirectory ? go(entry.path) : openFile(entry.path))}
-                      className="flex w-full items-center gap-4 rounded-xl px-4 py-3 text-left text-sm transition hover:bg-zinc-50 disabled:opacity-60 dark:hover:bg-zinc-800/70"
+                      className="flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-left text-sm transition hover:bg-zinc-50 disabled:opacity-60 dark:hover:bg-zinc-800/70"
                     >
                       {entry.isDirectory
-                        ? <Folder className="size-5 shrink-0 text-amber-500" />
-                        : <Document className="size-5 shrink-0 text-accent-500" />}
-                      <span className="min-w-0 flex-1 truncate font-medium">{entry.name}</span>
+                        ? <Folder className="size-4 shrink-0 text-amber-500" />
+                        : <Document className="size-4 shrink-0 text-accent-500" />}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-medium">{entry.name}</span>
+                        {!entry.isDirectory && <PeekLine peek={peeks.get(entry.path)} pending={!peeks.has(entry.path)} />}
+                      </span>
                       {opening === entry.path
                         ? <span className="animate-pulse text-xs text-zinc-500">Opening…</span>
                         : <span className="text-xs tabular-nums text-zinc-400">{formatSize(entry.size)}</span>}

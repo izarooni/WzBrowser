@@ -179,6 +179,13 @@ api.MapGet("/fs", (string? path, WzService wz) =>
     return new FsListing(full, dir.Parent?.FullName ?? "", entries);
 });
 
+// The names at a file's root, shown under it in the picker. Reads only the directory table, never an image.
+api.MapGet("/fs/peek", (string path, WzService wz) =>
+{
+    if (wz.Root != null) throw new UnauthorizedAccessException("This server only offers the files in its library folder.");
+    return wz.Peek(path);
+});
+
 // ---- WZ files ----
 api.MapGet("/files", (WzService wz, HttpContext ctx) => wz.List(browsableOnly: browseOnly));
 api.MapPost("/files", (OpenRequest req, WzService wz, HttpContext ctx) => wz.Open(req.Path, req.Encryption, browsableOnly: browseOnly));

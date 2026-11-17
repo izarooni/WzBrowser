@@ -122,6 +122,8 @@ export interface NodeEditResult { path: string; node: WzNode; file: OpenedFile }
 
 export interface FsEntry { name: string; path: string; isDirectory: boolean; size: number | null }
 export interface FsListing { path: string; parent: string | null; entries: FsEntry[] }
+/** A file's root nodes, read without parsing any image: how many, and the first few names (folders end in "/"). */
+export interface FilePeek { count: number; names: string[] }
 /** A file a pinned server offers; `name` is its path relative to the library folder. `kind` is set in browse-only mode. */
 export interface LibraryFile { name: string; path: string; size: number; kind?: "quest" | "etc" | null }
 
@@ -264,6 +266,8 @@ export function createApi(base: string) {
      */
     health: () => request<{ status: string; port: number; version: string; library?: boolean; readOnly?: boolean; browseOnly?: boolean; skills?: boolean; mobs?: boolean; mobLocations?: boolean; maps?: boolean; items?: boolean; npcs?: boolean }>("/api/health"),
     fs: (path = "") => request<FsListing>(`/api/fs?path=${q(path)}`),
+    /** The names at a .wz file's or .ms pack's root, for the picker. */
+    peek: (path: string) => request<FilePeek>(`/api/fs/peek?path=${q(path)}`),
     library: () => request<LibraryFile[]>("/api/library"),
     /** Every job's skills in the library, ordered by job id. */
     skills: () => request<SkillBook[]>("/api/skills"),
