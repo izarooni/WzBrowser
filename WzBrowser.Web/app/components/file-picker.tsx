@@ -1,6 +1,6 @@
 import { Dialog, DialogBackdrop, DialogPanel, DialogTitle, Listbox, ListboxButton, ListboxOption, ListboxOptions } from "@headlessui/react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { ENCRYPTIONS, type FilePeek, type FsEntry, type FsListing, type LibraryFile, type OpenedFile } from "../lib/api";
+import { ApiError, ENCRYPTIONS, type FilePeek, type FsEntry, type FsListing, type LibraryFile, type OpenedFile } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { ArrowUp, Check, ChevronUpDown, Document, Folder, XMark } from "./icons";
 import { buttonSecondary, inputClass } from "./ui";
@@ -40,6 +40,8 @@ const formatSize = (bytes: number | null) => {
 };
 
 // Root names already peeked, by path and size, so going back to a folder shows them at once.
+// "outdated": the API predates /fs/peek, so nothing can be shown until it's restarted (never cached).
+type PeekState = FilePeek | null | "outdated";
 const peekCache = new Map<string, FilePeek | null>();
 const peekKey = (e: FsEntry) => `${e.path}|${e.size}`;
 const PEEK_CONCURRENCY = 4;
@@ -48,20 +50,30 @@ const PEEK_CONCURRENCY = 4;
  * The root names of the listing's files, fetched a few at a time in the background. Only each file's directory table is
  * read, so this stays quick even for a folder of big _Canvas files. null: the file couldn't be read.
  */
-function usePeeks(entries: FsEntry[] | undefined): Map<string, FilePeek | null> {
+function usePeeks(entries: FsEntry[] | undefined): Map<string, PeekState> {
   const { api } = useConnection();
-  const [peeks, setPeeks] = useState<Map<string, FilePeek | null>>(new Map());
+  const [peeks, setPeeks] = useState<Map<string, PeekState>>(new Map());
 
   useEffect(() => {
     const files = (entries ?? []).filter((e) => !e.isDirectory);
-    const known = new Map(files.filter((f) => peekCache.has(peekKey(f))).map((f) => [f.path, peekCache.get(peekKey(f))!]));
+    const known = new Map<string, PeekState>(files.filter((f) => peekCache.has(peekKey(f))).map((f) => [f.path, peekCache.get(peekKey(f))!]));
     setPeeks(known);
     const queue = files.filter((f) => !peekCache.has(peekKey(f)));
     let cancelled = false;
     const worker = async () => {
       for (let f = queue.shift(); f && !cancelled; f = queue.shift()) {
         let peek: FilePeek | null = null;
-        try { peek = await api.peek(f.path); } catch { /* shown as unreadable */ }
+        try { peek = await api.peek(f.path); }
+        catch (e) {
+          if (e instanceof ApiError && e.status === 404 && e.message === "Unknown API route.") {
+            // An older API: stop asking, and say so on every row.
+            const outdated = new Map(files.map((x) => [x.path, "outdated" as const]));
+            queue.length = 0;
+            if (!cancelled) setPeeks(outdated);
+            return;
+          }
+          if (e instanceof ApiError && e.status === 0) return; // API unreachable: leave the rows pending, don't cache
+        }
         peekCache.set(peekKey(f), peek);
         if (!cancelled) { const path = f.path; setPeeks((m) => new Map(m).set(path, peek)); }
       }
@@ -74,7 +86,8 @@ function usePeeks(entries: FsEntry[] | undefined): Map<string, FilePeek | null> 
 }
 
 /** The small line under a file: its first root names, then how many more. */
-function PeekLine({ peek, pending }: { peek: FilePeek | null | undefined; pending: boolean }) {
+function PeekLine({ peek, pending }: { peek: PeekState | undefined; pending: boolean }) {
+  if (peek === "outdated") return <span className="block text-[11px] leading-4 text-zinc-400 italic">Restart WzBrowser.exe (rebuilt) to preview contents</span>;
   if (pending) return <span className="block h-3.5 w-2/5 animate-pulse rounded bg-zinc-100 dark:bg-zinc-800" />;
   if (peek === null) return <span className="block text-[11px] leading-4 text-zinc-400 italic">Couldn't read its contents</span>;
   if (!peek || peek.count === 0) return <span className="block text-[11px] leading-4 text-zinc-400 italic">Empty</span>;
