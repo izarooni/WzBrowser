@@ -5,13 +5,13 @@ export interface Focus { id: number }
 
 /** Returns a setter that scrolls the element with that DOM id to the top of its scroller as soon as it has rendered. */
 export function useScrollIntoView() {
-  const [target, setTarget] = useState<string | null>(null);
-  useEffect(() => {
-    if (!target) return;
-    const el = document.getElementById(target);
-    if (!el) return;
-    el.scrollIntoView({ block: "start" });
-    setTarget(null);
-  });
-  return setTarget;
+    const [target, setTarget] = useState<string | null>(null);
+    useEffect(() => {
+        if (!target) return;
+        const el = document.getElementById(target);
+        if (!el) return;
+        el.scrollIntoView({ block: "start" });
+        setTarget(null);
+    });
+    return setTarget;
 }

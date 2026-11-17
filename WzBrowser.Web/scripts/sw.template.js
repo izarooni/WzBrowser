@@ -10,50 +10,50 @@ const CACHE = "wzbrowser-__VERSION__";
 const PRECACHE = __PRECACHE__;
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(PRECACHE)).then(() => self.skipWaiting()),
-  );
+    event.waitUntil(
+        caches.open(CACHE).then((cache) => cache.addAll(PRECACHE)).then(() => self.skipWaiting()),
+    );
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k.startsWith("wzbrowser-") && k !== CACHE).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim()),
-  );
+    event.waitUntil(
+        caches.keys()
+            .then((keys) => Promise.all(keys.filter((k) => k.startsWith("wzbrowser-") && k !== CACHE).map((k) => caches.delete(k))))
+            .then(() => self.clients.claim()),
+    );
 });
 
 self.addEventListener("fetch", (event) => {
-  const req = event.request;
-  if (req.method !== "GET") return;
+    const req = event.request;
+    if (req.method !== "GET") return;
 
-  const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return; // API and everything else: hands off
-  if (url.pathname.startsWith("/api/") || url.pathname === "/config.json") return; // always live
+    const url = new URL(req.url);
+    if (url.origin !== self.location.origin) return; // API and everything else: hands off
+    if (url.pathname.startsWith("/api/") || url.pathname === "/config.json") return; // always live
 
-  // Page navigations (any client-side route): serve the cached shell, refresh it in the background.
-  if (req.mode === "navigate") {
+    // Page navigations (any client-side route): serve the cached shell, refresh it in the background.
+    if (req.mode === "navigate") {
+        event.respondWith(
+            caches.open(CACHE).then(async (cache) => {
+                const cached = await cache.match("/index.html");
+                const refresh = fetch("/index.html", { cache: "no-cache" })
+                    .then((res) => { if (res.ok) cache.put("/index.html", res.clone()); return res; })
+                    .catch(() => undefined);
+                if (cached) { event.waitUntil(refresh); return cached; }
+                return (await refresh) ?? Response.error();
+            }),
+        );
+        return;
+    }
+
+    // Hashed build assets are immutable: cache first.
     event.respondWith(
-      caches.open(CACHE).then(async (cache) => {
-        const cached = await cache.match("/index.html");
-        const refresh = fetch("/index.html", { cache: "no-cache" })
-          .then((res) => { if (res.ok) cache.put("/index.html", res.clone()); return res; })
-          .catch(() => undefined);
-        if (cached) { event.waitUntil(refresh); return cached; }
-        return (await refresh) ?? Response.error();
-      }),
+        caches.match(req).then((hit) => hit ?? fetch(req).then((res) => {
+            if (res.ok) {
+                const copy = res.clone();
+                caches.open(CACHE).then((c) => c.put(req, copy));
+            }
+            return res;
+        })),
     );
-    return;
-  }
-
-  // Hashed build assets are immutable: cache first.
-  event.respondWith(
-    caches.match(req).then((hit) => hit ?? fetch(req).then((res) => {
-      if (res.ok) {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(req, copy));
-      }
-      return res;
-    })),
-  );
 });

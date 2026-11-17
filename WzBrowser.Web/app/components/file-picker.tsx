@@ -3,15 +3,14 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { ApiError, ENCRYPTIONS, type FilePeek, type FsEntry, type FsListing, type LibraryFile, type OpenedFile } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { ArrowUp, Check, ChevronUpDown, Document, Folder, XMark } from "./icons";
-import { buttonSecondary, inputClass } from "./ui";
 
 const LAST_DIR_KEY = "wzbrowser.lastDir";
 
 const readLastDir = () => {
-  try { return localStorage.getItem(LAST_DIR_KEY) ?? ""; } catch { return ""; }
+    try { return localStorage.getItem(LAST_DIR_KEY) ?? ""; } catch { return ""; }
 };
 const writeLastDir = (dir: string) => {
-  try { localStorage.setItem(LAST_DIR_KEY, dir); } catch { /* not persisted */ }
+    try { localStorage.setItem(LAST_DIR_KEY, dir); } catch { /* not persisted */ }
 };
 
 // Folders files were opened from, most recent first. Kept in the browser only; the server never sees them.
@@ -19,24 +18,24 @@ const RECENT_DIRS_KEY = "wzbrowser.recentDirs";
 const MAX_RECENT_DIRS = 10;
 
 const readRecentDirs = (): string[] => {
-  try {
-    const v: unknown = JSON.parse(localStorage.getItem(RECENT_DIRS_KEY) ?? "[]");
-    return Array.isArray(v) ? v.filter((d): d is string => typeof d === "string") : [];
-  } catch { return []; }
+    try {
+        const v: unknown = JSON.parse(localStorage.getItem(RECENT_DIRS_KEY) ?? "[]");
+        return Array.isArray(v) ? v.filter((d): d is string => typeof d === "string") : [];
+    } catch { return []; }
 };
 const writeRecentDirs = (dirs: string[]) => {
-  try { localStorage.setItem(RECENT_DIRS_KEY, JSON.stringify(dirs)); } catch { /* not persisted */ }
+    try { localStorage.setItem(RECENT_DIRS_KEY, JSON.stringify(dirs)); } catch { /* not persisted */ }
 };
 const sameDir = (a: string, b: string) => a.replace(/[\\/]+$/, "").toLowerCase() === b.replace(/[\\/]+$/, "").toLowerCase();
 /** "D:\Games\Data\Mob.wz" -> "D:\Games\Data". */
 const parentDir = (path: string) => path.replace(/[\\/][^\\/]*$/, "") || path;
 
 const formatSize = (bytes: number | null) => {
-  if (bytes == null) return "";
-  const units = ["B", "KB", "MB", "GB"];
-  let n = bytes, i = 0;
-  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
-  return `${n >= 10 || i === 0 ? Math.round(n) : n.toFixed(1)} ${units[i]}`;
+    if (bytes == null) return "";
+    const units = ["B", "KB", "MB", "GB"];
+    let n = bytes, i = 0;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return `${n >= 10 || i === 0 ? Math.round(n) : n.toFixed(1)} ${units[i]}`;
 };
 
 // Root names already peeked, by path and size, so going back to a folder shows them at once.
@@ -51,295 +50,295 @@ const PEEK_CONCURRENCY = 4;
  * read, so this stays quick even for a folder of big _Canvas files. null: the file couldn't be read.
  */
 function usePeeks(entries: FsEntry[] | undefined): Map<string, PeekState> {
-  const { api } = useConnection();
-  const [peeks, setPeeks] = useState<Map<string, PeekState>>(new Map());
+    const { api } = useConnection();
+    const [peeks, setPeeks] = useState<Map<string, PeekState>>(new Map());
 
-  useEffect(() => {
-    const files = (entries ?? []).filter((e) => !e.isDirectory);
-    const known = new Map<string, PeekState>(files.filter((f) => peekCache.has(peekKey(f))).map((f) => [f.path, peekCache.get(peekKey(f))!]));
-    setPeeks(known);
-    const queue = files.filter((f) => !peekCache.has(peekKey(f)));
-    let cancelled = false;
-    const worker = async () => {
-      for (let f = queue.shift(); f && !cancelled; f = queue.shift()) {
-        let peek: FilePeek | null = null;
-        try { peek = await api.peek(f.path); }
-        catch (e) {
-          if (e instanceof ApiError && e.status === 404 && e.message === "Unknown API route.") {
-            // An older API: stop asking, and say so on every row.
-            const outdated = new Map(files.map((x) => [x.path, "outdated" as const]));
-            queue.length = 0;
-            if (!cancelled) setPeeks(outdated);
-            return;
-          }
-          if (e instanceof ApiError && e.status === 0) return; // API unreachable: leave the rows pending, don't cache
-        }
-        peekCache.set(peekKey(f), peek);
-        if (!cancelled) { const path = f.path; setPeeks((m) => new Map(m).set(path, peek)); }
-      }
-    };
-    for (let i = 0; i < PEEK_CONCURRENCY; i++) void worker();
-    return () => { cancelled = true; };
-  }, [entries, api]);
+    useEffect(() => {
+        const files = (entries ?? []).filter((e) => !e.isDirectory);
+        const known = new Map<string, PeekState>(files.filter((f) => peekCache.has(peekKey(f))).map((f) => [f.path, peekCache.get(peekKey(f))!]));
+        setPeeks(known);
+        const queue = files.filter((f) => !peekCache.has(peekKey(f)));
+        let cancelled = false;
+        const worker = async () => {
+            for (let f = queue.shift(); f && !cancelled; f = queue.shift()) {
+                let peek: FilePeek | null = null;
+                try { peek = await api.peek(f.path); }
+                catch (e) {
+                    if (e instanceof ApiError && e.status === 404 && e.message === "Unknown API route.") {
+                        // An older API: stop asking, and say so on every row.
+                        const outdated = new Map(files.map((x) => [x.path, "outdated" as const]));
+                        queue.length = 0;
+                        if (!cancelled) setPeeks(outdated);
+                        return;
+                    }
+                    if (e instanceof ApiError && e.status === 0) return; // API unreachable: leave the rows pending, don't cache
+                }
+                peekCache.set(peekKey(f), peek);
+                if (!cancelled) { const path = f.path; setPeeks((m) => new Map(m).set(path, peek)); }
+            }
+        };
+        for (let i = 0; i < PEEK_CONCURRENCY; i++) void worker();
+        return () => { cancelled = true; };
+    }, [entries, api]);
 
-  return peeks;
+    return peeks;
 }
 
 /** The small line under a file: its first root names, then how many more. */
 function PeekLine({ peek, pending }: { peek: PeekState | undefined; pending: boolean }) {
-  if (peek === "outdated") return <span className="block text-[11px] leading-4 text-zinc-300 italic dark:text-zinc-600">Restart WzBrowser.exe (rebuilt) to preview contents</span>;
-  if (pending) return <span className="block h-3.5 w-2/5 animate-pulse rounded bg-zinc-100 dark:bg-zinc-800" />;
-  if (peek === null) return <span className="block text-[11px] leading-4 text-zinc-300 italic dark:text-zinc-600">Couldn't read its contents</span>;
-  if (!peek || peek.count === 0) return <span className="block text-[11px] leading-4 text-zinc-300 italic dark:text-zinc-600">Empty</span>;
-  const shown = peek.names.map((n) => n.replace(/\.img$/i, ""));
-  const more = peek.count - shown.length;
-  return (
-    <span title={peek.names.join("\n") + (more > 0 ? `\n… ${more} more` : "")}
-      className="block truncate font-mono text-[11px] leading-4 text-zinc-400 dark:text-zinc-500">
-      {shown.join(" · ")}
-      {more > 0 && <span className="text-zinc-300 dark:text-zinc-600"> · +{more}</span>}
-    </span>
-  );
+    if (peek === "outdated") return <span className="peek-note">Restart WzBrowser.exe (rebuilt) to preview contents</span>;
+    if (pending) return <span className="block h-3.5 w-2/5 animate-pulse rounded bg-zinc-100 dark:bg-zinc-800" />;
+    if (peek === null) return <span className="peek-note">Couldn't read its contents</span>;
+    if (!peek || peek.count === 0) return <span className="peek-note">Empty</span>;
+    const shown = peek.names.map((n) => n.replace(/\.img$/i, ""));
+    const more = peek.count - shown.length;
+    return (
+        <span title={peek.names.join("\n") + (more > 0 ? `\n… ${more} more` : "")}
+            className="peek">
+            {shown.join(" · ")}
+            {more > 0 && <span className="peek-more"> · +{more}</span>}
+        </span>
+    );
 }
 
 export function EncryptionSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  return (
-    <Listbox value={value} onChange={onChange}>
-      <div className="relative">
-        <ListboxButton className="flex w-full items-center justify-between gap-3 rounded-xl border border-zinc-300 bg-white px-4 py-2.5 text-left text-sm shadow-sm focus:outline-2 focus:outline-accent-500/40 dark:border-zinc-700 dark:bg-zinc-950">
-          <span>{value}</span>
-          <ChevronUpDown className="size-4 text-zinc-400" />
-        </ListboxButton>
-        <ListboxOptions
-          anchor="bottom start"
-          transition
-          className="z-[60] w-(--button-width) rounded-xl border border-zinc-200 bg-white p-2 shadow-lg transition duration-100 [--anchor-gap:6px] focus:outline-none data-[closed]:opacity-0 dark:border-zinc-700 dark:bg-zinc-900"
-        >
-          {ENCRYPTIONS.map((enc) => (
-            <ListboxOption
-              key={enc}
-              value={enc}
-              className="group flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-sm data-[focus]:bg-accent-50 dark:data-[focus]:bg-zinc-800"
-            >
-              <span>{enc}</span>
-              <Check className="invisible size-4 text-accent-600 group-data-[selected]:visible" />
-            </ListboxOption>
-          ))}
-        </ListboxOptions>
-      </div>
-    </Listbox>
-  );
+    return (
+        <Listbox value={value} onChange={onChange}>
+            <div className="relative">
+                <ListboxButton className="flex w-full items-center justify-between gap-3 rounded-xl border border-zinc-300 bg-white px-4 py-2.5 text-left text-sm shadow-sm focus:outline-2 focus:outline-accent-500/40 dark:border-zinc-700 dark:bg-zinc-950">
+                    <span>{value}</span>
+                    <ChevronUpDown className="size-4 text-zinc-400" />
+                </ListboxButton>
+                <ListboxOptions
+                    anchor="bottom start"
+                    transition
+                    className="z-[60] w-(--button-width) rounded-xl border border-zinc-200 bg-white p-2 shadow-lg transition duration-100 [--anchor-gap:6px] focus:outline-none data-[closed]:opacity-0 dark:border-zinc-700 dark:bg-zinc-900"
+                >
+                    {ENCRYPTIONS.map((enc) => (
+                        <ListboxOption
+                            key={enc}
+                            value={enc}
+                            className="group flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-sm data-[focus]:bg-accent-50 dark:data-[focus]:bg-zinc-800"
+                        >
+                            <span>{enc}</span>
+                            <Check className="invisible size-4 text-accent-600 group-data-[selected]:visible" />
+                        </ListboxOption>
+                    ))}
+                </ListboxOptions>
+            </div>
+        </Listbox>
+    );
 }
 
 interface PickerProps { open: boolean; onClose: () => void; onOpened: (file: OpenedFile) => void }
 
 /** Browses the disk, or, when the server is pinned to a library folder, picks from the files it offers. */
 export function FilePicker(props: PickerProps) {
-  const { library } = useConnection();
-  return library ? <LibraryPicker {...props} /> : <FolderPicker {...props} />;
+    const { library } = useConnection();
+    return library ? <LibraryPicker {...props} /> : <FolderPicker {...props} />;
 }
 
 function FolderPicker({ open, onClose, onOpened }: PickerProps) {
-  const { api, status } = useConnection();
-  const [listing, setListing] = useState<FsListing | null>(null);
-  const [pathInput, setPathInput] = useState("");
-  const [encryption, setEncryption] = useState("Auto");
-  const [loading, setLoading] = useState(false);
-  const [opening, setOpening] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [recentDirs, setRecentDirs] = useState<string[]>([]);
-  const [showRecent, setShowRecent] = useState(false);
-  const peeks = usePeeks(listing?.entries);
+    const { api, status } = useConnection();
+    const [listing, setListing] = useState<FsListing | null>(null);
+    const [pathInput, setPathInput] = useState("");
+    const [encryption, setEncryption] = useState("Auto");
+    const [loading, setLoading] = useState(false);
+    const [opening, setOpening] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [recentDirs, setRecentDirs] = useState<string[]>([]);
+    const [showRecent, setShowRecent] = useState(false);
+    const peeks = usePeeks(listing?.entries);
 
-  useEffect(() => { if (open) setRecentDirs(readRecentDirs()); }, [open]);
+    useEffect(() => { if (open) setRecentDirs(readRecentDirs()); }, [open]);
 
-  const rememberDir = (dir: string) => {
-    const next = [dir, ...readRecentDirs().filter((d) => !sameDir(d, dir))].slice(0, MAX_RECENT_DIRS);
-    writeRecentDirs(next);
-    setRecentDirs(next);
-  };
-  const forgetDir = (dir: string) => {
-    const next = readRecentDirs().filter((d) => !sameDir(d, dir));
-    writeRecentDirs(next);
-    setRecentDirs(next);
-  };
+    const rememberDir = (dir: string) => {
+        const next = [dir, ...readRecentDirs().filter((d) => !sameDir(d, dir))].slice(0, MAX_RECENT_DIRS);
+        writeRecentDirs(next);
+        setRecentDirs(next);
+    };
+    const forgetDir = (dir: string) => {
+        const next = readRecentDirs().filter((d) => !sameDir(d, dir));
+        writeRecentDirs(next);
+        setRecentDirs(next);
+    };
 
-  const go = useCallback(async (path: string): Promise<boolean> => {
-    setLoading(true);
-    setError(null);
-    try {
-      const l = await api.fs(path);
-      setListing(l);
-      setPathInput(l.path);
-      writeLastDir(l.path);
-      return true;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      return false;
-    } finally {
-      setLoading(false);
-    }
-  }, [api]);
+    const go = useCallback(async (path: string): Promise<boolean> => {
+        setLoading(true);
+        setError(null);
+        try {
+            const l = await api.fs(path);
+            setListing(l);
+            setPathInput(l.path);
+            writeLastDir(l.path);
+            return true;
+        } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+            return false;
+        } finally {
+            setLoading(false);
+        }
+    }, [api]);
 
-  useEffect(() => {
-    if (!open || status !== "online") return;
-    const last = readLastDir();
-    // A stale remembered folder shouldn't trap the user: fall back to the drive list.
-    go(last).then((ok) => { if (!ok && last) go(""); });
-  }, [open, status, go]);
+    useEffect(() => {
+        if (!open || status !== "online") return;
+        const last = readLastDir();
+        // A stale remembered folder shouldn't trap the user: fall back to the drive list.
+        go(last).then((ok) => { if (!ok && last) go(""); });
+    }, [open, status, go]);
 
-  const openFile = async (path: string) => {
-    setOpening(path);
-    setError(null);
-    try {
-      const file = await api.open(path, encryption);
-      rememberDir(parentDir(path));
-      onOpened(file);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setOpening(null);
-    }
-  };
+    const openFile = async (path: string) => {
+        setOpening(path);
+        setError(null);
+        try {
+            const file = await api.open(path, encryption);
+            rememberDir(parentDir(path));
+            onOpened(file);
+        } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+        } finally {
+            setOpening(null);
+        }
+    };
 
-  const submitPath = (e: FormEvent) => {
-    e.preventDefault();
-    setShowRecent(false);
-    const p = pathInput.trim();
-    if (!p) return go("");
-    if (/\.(wz|ms)$/i.test(p)) openFile(p);
-    else go(p);
-  };
+    const submitPath = (e: FormEvent) => {
+        e.preventDefault();
+        setShowRecent(false);
+        const p = pathInput.trim();
+        if (!p) return go("");
+        if (/\.(wz|ms)$/i.test(p)) openFile(p);
+        else go(p);
+    };
 
-  return (
-    <Dialog open={open} onClose={onClose} className="relative z-50">
-      <DialogBackdrop transition className="fixed inset-0 bg-zinc-950/40 backdrop-blur-sm transition duration-200 data-[closed]:opacity-0" />
-      <div className="fixed inset-0 flex items-center justify-center p-4 sm:p-6">
-        <DialogPanel
-          transition
-          className="flex max-h-[85dvh] w-full max-w-3xl flex-col rounded-2xl border border-zinc-200 bg-white shadow-xl transition duration-200 data-[closed]:scale-95 data-[closed]:opacity-0 dark:border-zinc-800 dark:bg-zinc-900"
-        >
-          <div className="flex items-start justify-between gap-6 p-8 pb-6">
-            <div className="space-y-2">
-              <DialogTitle className="text-xl font-semibold">Open a WZ file</DialogTitle>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">Browse to a game folder, or paste a path to a .wz file or .ms pack.</p>
+    return (
+        <Dialog open={open} onClose={onClose} className="relative z-50">
+            <DialogBackdrop transition className="dialog-backdrop" />
+            <div className="fixed inset-0 flex items-center justify-center p-4 sm:p-6">
+                <DialogPanel
+                    transition
+                    className="flex max-h-[85dvh] w-full max-w-3xl flex-col rounded-2xl border border-zinc-200 bg-white shadow-xl transition duration-200 data-[closed]:scale-95 data-[closed]:opacity-0 dark:border-zinc-800 dark:bg-zinc-900"
+                >
+                    <div className="flex items-start justify-between gap-6 p-8 pb-6">
+                        <div className="space-y-2">
+                            <DialogTitle className="text-xl font-semibold">Open a WZ file</DialogTitle>
+                            <p className="text-sm text-zinc-500 dark:text-zinc-400">Browse to a game folder, or paste a path to a .wz file or .ms pack.</p>
+                        </div>
+                        <button type="button" onClick={onClose} aria-label="Close" className="btn-close">
+                            <XMark className="size-5" />
+                        </button>
+                    </div>
+
+                    <div className="space-y-5 px-8 pb-6">
+                        <form onSubmit={submitPath} className="flex gap-3">
+                            <button
+                                type="button"
+                                aria-label="Parent folder"
+                                disabled={!listing || listing.parent == null}
+                                onClick={() => listing?.parent != null && go(listing.parent)}
+                                className="rounded-xl border border-zinc-300 px-3.5 text-zinc-600 transition hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                            >
+                                <ArrowUp className="size-5" />
+                            </button>
+                            <div className="relative min-w-0 flex-1">
+                                <input
+                                    value={pathInput}
+                                    onChange={(e) => setPathInput(e.target.value)}
+                                    onFocus={() => setShowRecent(true)}
+                                    onClick={() => setShowRecent(true)}
+                                    onBlur={() => setShowRecent(false)}
+                                    onKeyDown={(e) => {
+                                        // Close the list first; a second Escape closes the dialog.
+                                        if (e.key === "Escape" && showRecent && recentDirs.length > 0) { e.preventDefault(); e.stopPropagation(); setShowRecent(false); }
+                                    }}
+                                    placeholder="D:\Games\MapleStory"
+                                    spellCheck={false}
+                                    autoComplete="off"
+                                    className="input font-mono"
+                                />
+                                {showRecent && recentDirs.length > 0 && (
+                                    // mousedown is cancelled so clicking an item doesn't blur the input (which would hide the list first).
+                                    <div onMouseDown={(e) => e.preventDefault()}
+                                        className="absolute inset-x-0 top-full z-10 mt-1.5 rounded-xl border border-zinc-200 bg-white p-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+                                        <p className="px-3 pb-1.5 pt-1 text-xs font-medium text-zinc-400">Recent folders</p>
+                                        <ul className="max-h-72 overflow-y-auto">
+                                            {recentDirs.map((dir) => (
+                                                <li key={dir} className="group flex items-center rounded-lg hover:bg-accent-50 dark:hover:bg-zinc-800">
+                                                    <button
+                                                        type="button"
+                                                        title={dir}
+                                                        onClick={() => { setShowRecent(false); go(dir).then((ok) => { if (!ok) forgetDir(dir); }); }}
+                                                        className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left text-sm"
+                                                    >
+                                                        <Folder className="size-4 shrink-0 text-amber-500" />
+                                                        <span className="truncate font-mono">{dir}</span>
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        aria-label={`Remove ${dir} from recent folders`}
+                                                        onClick={() => forgetDir(dir)}
+                                                        className="mr-1 rounded-md p-1.5 text-zinc-400 opacity-0 transition hover:bg-zinc-200 hover:text-zinc-700 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
+                                                    >
+                                                        <XMark className="size-3.5" />
+                                                    </button>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+                            <button type="submit" className="btn-secondary">Go</button>
+                        </form>
+
+                        <div className="flex items-center gap-4">
+                            <span className="text-sm font-medium text-zinc-600 dark:text-zinc-300">Encryption</span>
+                            <div className="w-44"><EncryptionSelect value={encryption} onChange={setEncryption} /></div>
+                            <span className="text-xs text-zinc-400">Auto works for most files.</span>
+                        </div>
+
+                        {error && (
+                            <div role="alert" className="alert">
+                                {error}
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="min-h-0 flex-1 overflow-y-auto border-t border-zinc-100 p-4 dark:border-zinc-800">
+                        {status !== "online" ? (
+                            <p className="px-4 py-16 text-center text-sm text-zinc-500">The WzBrowser API isn't reachable. Start WzBrowser.exe, then try again.</p>
+                        ) : loading && !listing ? (
+                            <div className="space-y-2 p-2">{Array.from({ length: 6 }, (_, i) => <div key={i} className="skeleton h-12 rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
+                        ) : listing && listing.entries.length === 0 ? (
+                            <p className="px-4 py-16 text-center text-sm text-zinc-500">No folders, .wz files or .ms packs here.</p>
+                        ) : (
+                            <ul>
+                                {listing?.entries.map((entry) => (
+                                    <li key={entry.path}>
+                                        <button
+                                            type="button"
+                                            disabled={opening !== null}
+                                            onClick={() => (entry.isDirectory ? go(entry.path) : openFile(entry.path))}
+                                            className="flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-left text-sm transition hover:bg-zinc-50 disabled:opacity-60 dark:hover:bg-zinc-800/70"
+                                        >
+                                            {entry.isDirectory
+                                                ? <Folder className="size-4 shrink-0 text-amber-500" />
+                                                : <Document className="size-4 shrink-0 text-accent-500" />}
+                                            <span className="min-w-0 flex-1">
+                                                <span className="block truncate font-medium">{entry.name}</span>
+                                                {!entry.isDirectory && <PeekLine peek={peeks.get(entry.path)} pending={!peeks.has(entry.path)} />}
+                                            </span>
+                                            {opening === entry.path
+                                                ? <span className="animate-pulse text-xs text-zinc-500">Opening…</span>
+                                                : <span className="text-xs tabular-nums text-zinc-400">{formatSize(entry.size)}</span>}
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                    </div>
+                </DialogPanel>
             </div>
-            <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800">
-              <XMark className="size-5" />
-            </button>
-          </div>
-
-          <div className="space-y-5 px-8 pb-6">
-            <form onSubmit={submitPath} className="flex gap-3">
-              <button
-                type="button"
-                aria-label="Parent folder"
-                disabled={!listing || listing.parent == null}
-                onClick={() => listing?.parent != null && go(listing.parent)}
-                className="rounded-xl border border-zinc-300 px-3.5 text-zinc-600 transition hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              >
-                <ArrowUp className="size-5" />
-              </button>
-              <div className="relative min-w-0 flex-1">
-                <input
-                  value={pathInput}
-                  onChange={(e) => setPathInput(e.target.value)}
-                  onFocus={() => setShowRecent(true)}
-                  onClick={() => setShowRecent(true)}
-                  onBlur={() => setShowRecent(false)}
-                  onKeyDown={(e) => {
-                    // Close the list first; a second Escape closes the dialog.
-                    if (e.key === "Escape" && showRecent && recentDirs.length > 0) { e.preventDefault(); e.stopPropagation(); setShowRecent(false); }
-                  }}
-                  placeholder="D:\Games\MapleStory"
-                  spellCheck={false}
-                  autoComplete="off"
-                  className={`${inputClass} font-mono`}
-                />
-                {showRecent && recentDirs.length > 0 && (
-                  // mousedown is cancelled so clicking an item doesn't blur the input (which would hide the list first).
-                  <div onMouseDown={(e) => e.preventDefault()}
-                    className="absolute inset-x-0 top-full z-10 mt-1.5 rounded-xl border border-zinc-200 bg-white p-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
-                    <p className="px-3 pb-1.5 pt-1 text-xs font-medium text-zinc-400">Recent folders</p>
-                    <ul className="max-h-72 overflow-y-auto">
-                      {recentDirs.map((dir) => (
-                        <li key={dir} className="group flex items-center rounded-lg hover:bg-accent-50 dark:hover:bg-zinc-800">
-                          <button
-                            type="button"
-                            title={dir}
-                            onClick={() => { setShowRecent(false); go(dir).then((ok) => { if (!ok) forgetDir(dir); }); }}
-                            className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left text-sm"
-                          >
-                            <Folder className="size-4 shrink-0 text-amber-500" />
-                            <span className="truncate font-mono">{dir}</span>
-                          </button>
-                          <button
-                            type="button"
-                            aria-label={`Remove ${dir} from recent folders`}
-                            onClick={() => forgetDir(dir)}
-                            className="mr-1 rounded-md p-1.5 text-zinc-400 opacity-0 transition hover:bg-zinc-200 hover:text-zinc-700 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
-                          >
-                            <XMark className="size-3.5" />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-              <button type="submit" className={buttonSecondary}>Go</button>
-            </form>
-
-            <div className="flex items-center gap-4">
-              <span className="text-sm font-medium text-zinc-600 dark:text-zinc-300">Encryption</span>
-              <div className="w-44"><EncryptionSelect value={encryption} onChange={setEncryption} /></div>
-              <span className="text-xs text-zinc-400">Auto works for most files.</span>
-            </div>
-
-            {error && (
-              <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300">
-                {error}
-              </div>
-            )}
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-y-auto border-t border-zinc-100 p-4 dark:border-zinc-800">
-            {status !== "online" ? (
-              <p className="px-4 py-16 text-center text-sm text-zinc-500">The WzBrowser API isn't reachable. Start WzBrowser.exe, then try again.</p>
-            ) : loading && !listing ? (
-              <div className="space-y-2 p-2">{Array.from({ length: 6 }, (_, i) => <div key={i} className="skeleton h-12 rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
-            ) : listing && listing.entries.length === 0 ? (
-              <p className="px-4 py-16 text-center text-sm text-zinc-500">No folders, .wz files or .ms packs here.</p>
-            ) : (
-              <ul>
-                {listing?.entries.map((entry) => (
-                  <li key={entry.path}>
-                    <button
-                      type="button"
-                      disabled={opening !== null}
-                      onClick={() => (entry.isDirectory ? go(entry.path) : openFile(entry.path))}
-                      className="flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-left text-sm transition hover:bg-zinc-50 disabled:opacity-60 dark:hover:bg-zinc-800/70"
-                    >
-                      {entry.isDirectory
-                        ? <Folder className="size-4 shrink-0 text-amber-500" />
-                        : <Document className="size-4 shrink-0 text-accent-500" />}
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate font-medium">{entry.name}</span>
-                        {!entry.isDirectory && <PeekLine peek={peeks.get(entry.path)} pending={!peeks.has(entry.path)} />}
-                      </span>
-                      {opening === entry.path
-                        ? <span className="animate-pulse text-xs text-zinc-500">Opening…</span>
-                        : <span className="text-xs tabular-nums text-zinc-400">{formatSize(entry.size)}</span>}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </DialogPanel>
-      </div>
-    </Dialog>
-  );
+        </Dialog>
+    );
 }
 
 /**
@@ -350,147 +349,147 @@ const baseLabel = (name: string) => name.split("/").pop()!.replace(/\.(wz|ms)$/i
 
 /** Short button labels. Names that would repeat (each folder's _Canvas) get their parent folders until they don't. */
 export function libraryLabels(files: LibraryFile[]): Map<string, string> {
-  const labels = new Map<string, string>();
-  const groups = new Map<string, LibraryFile[]>();
-  for (const f of files) {
-    const base = baseLabel(f.name);
-    groups.set(base, [...(groups.get(base) ?? []), f]);
-  }
-  for (const [base, group] of groups) {
-    if (group.length === 1) { labels.set(group[0].path, base); continue; }
-    // Parent folders, nearest first, skipping one named like the file itself (Etc/Etc_000.wz).
-    const parents = group.map((f) => f.name.split("/").slice(0, -1).reverse().filter((p) => p !== base));
-    // Only the labels that still clash get another folder, so one clash doesn't lengthen the rest.
-    const depth = group.map(() => 1);
-    const label = (i: number) => parents[i].slice(0, depth[i]).reverse().concat(base).join(" / ");
-    for (let grew = true; grew;) {
-      grew = false;
-      const counts = new Map<string, number>();
-      group.forEach((_, i) => counts.set(label(i), (counts.get(label(i)) ?? 0) + 1));
-      group.forEach((_, i) => {
-        if (counts.get(label(i))! > 1 && depth[i] < parents[i].length) { depth[i]++; grew = true; }
-      });
+    const labels = new Map<string, string>();
+    const groups = new Map<string, LibraryFile[]>();
+    for (const f of files) {
+        const base = baseLabel(f.name);
+        groups.set(base, [...(groups.get(base) ?? []), f]);
     }
-    group.forEach((f, i) => labels.set(f.path, label(i)));
-  }
-  return labels;
+    for (const [base, group] of groups) {
+        if (group.length === 1) { labels.set(group[0].path, base); continue; }
+        // Parent folders, nearest first, skipping one named like the file itself (Etc/Etc_000.wz).
+        const parents = group.map((f) => f.name.split("/").slice(0, -1).reverse().filter((p) => p !== base));
+        // Only the labels that still clash get another folder, so one clash doesn't lengthen the rest.
+        const depth = group.map(() => 1);
+        const label = (i: number) => parents[i].slice(0, depth[i]).reverse().concat(base).join(" / ");
+        for (let grew = true; grew;) {
+            grew = false;
+            const counts = new Map<string, number>();
+            group.forEach((_, i) => counts.set(label(i), (counts.get(label(i)) ?? 0) + 1));
+            group.forEach((_, i) => {
+                if (counts.get(label(i))! > 1 && depth[i] < parents[i].length) { depth[i]++; grew = true; }
+            });
+        }
+        group.forEach((f, i) => labels.set(f.path, label(i)));
+    }
+    return labels;
 }
 
 /** A pinned server's files as a column of buttons; a filter appears once there are many (matches the label or path). */
 function LibraryPicker({ open, onClose, onOpened }: PickerProps) {
-  const { api, status, browseOnly } = useConnection();
-  const [files, setFiles] = useState<LibraryFile[] | null>(null);
-  const [query, setQuery] = useState("");
-  const [encryption, setEncryption] = useState("Auto");
-  const [opening, setOpening] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+    const { api, status, browseOnly } = useConnection();
+    const [files, setFiles] = useState<LibraryFile[] | null>(null);
+    const [query, setQuery] = useState("");
+    const [encryption, setEncryption] = useState("Auto");
+    const [opening, setOpening] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!open || status !== "online") return;
-    let cancelled = false;
-    setError(null);
-    api.library()
-      .then((list) => { if (!cancelled) setFiles(list); })
-      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); });
-    return () => { cancelled = true; };
-  }, [open, status, api]);
+    useEffect(() => {
+        if (!open || status !== "online") return;
+        let cancelled = false;
+        setError(null);
+        api.library()
+            .then((list) => { if (!cancelled) setFiles(list); })
+            .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); });
+        return () => { cancelled = true; };
+    }, [open, status, api]);
 
-  const labels = useMemo(() => libraryLabels(files ?? []), [files]);
-  const visible = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!files) return [];
-    return needle ? files.filter((f) => f.name.toLowerCase().includes(needle) || labels.get(f.path)!.toLowerCase().includes(needle)) : files;
-  }, [files, labels, query]);
+    const labels = useMemo(() => libraryLabels(files ?? []), [files]);
+    const visible = useMemo(() => {
+        const needle = query.trim().toLowerCase();
+        if (!files) return [];
+        return needle ? files.filter((f) => f.name.toLowerCase().includes(needle) || labels.get(f.path)!.toLowerCase().includes(needle)) : files;
+    }, [files, labels, query]);
 
-  const openFile = async (file: LibraryFile) => {
-    setOpening(file.path);
-    setError(null);
-    try {
-      onOpened(await api.open(file.path, encryption));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setOpening(null);
-    }
-  };
+    const openFile = async (file: LibraryFile) => {
+        setOpening(file.path);
+        setError(null);
+        try {
+            onOpened(await api.open(file.path, encryption));
+        } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+        } finally {
+            setOpening(null);
+        }
+    };
 
-  return (
-    <Dialog open={open} onClose={onClose} className="relative z-50">
-      <DialogBackdrop transition className="fixed inset-0 bg-zinc-950/40 backdrop-blur-sm transition duration-200 data-[closed]:opacity-0" />
-      <div className="fixed inset-0 flex items-center justify-center p-4 sm:p-6">
-        <DialogPanel
-          transition
-          className="w-full max-w-2xl space-y-6 rounded-2xl border border-zinc-200 bg-white p-8 shadow-xl transition duration-200 data-[closed]:scale-95 data-[closed]:opacity-0 dark:border-zinc-800 dark:bg-zinc-900"
-        >
-          <div className="flex items-start justify-between gap-6">
-            <div className="space-y-2">
-              <DialogTitle className="text-xl font-semibold">Open a WZ file</DialogTitle>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                {browseOnly ? "Pick a quest archive or Etc.wz to browse its quests or Cash Shop entries." : "Pick one of the files this server offers."}
-              </p>
+    return (
+        <Dialog open={open} onClose={onClose} className="relative z-50">
+            <DialogBackdrop transition className="dialog-backdrop" />
+            <div className="fixed inset-0 flex items-center justify-center p-4 sm:p-6">
+                <DialogPanel
+                    transition
+                    className="w-full max-w-2xl space-y-6 rounded-2xl border border-zinc-200 bg-white p-8 shadow-xl transition duration-200 data-[closed]:scale-95 data-[closed]:opacity-0 dark:border-zinc-800 dark:bg-zinc-900"
+                >
+                    <div className="flex items-start justify-between gap-6">
+                        <div className="space-y-2">
+                            <DialogTitle className="text-xl font-semibold">Open a WZ file</DialogTitle>
+                            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                                {browseOnly ? "Pick a quest archive or Etc.wz to browse its quests or Cash Shop entries." : "Pick one of the files this server offers."}
+                            </p>
+                        </div>
+                        <button type="button" onClick={onClose} aria-label="Close" className="btn-close">
+                            <XMark className="size-5" />
+                        </button>
+                    </div>
+
+                    {status !== "online" ? (
+                        <p className="py-10 text-center text-sm text-zinc-500">The WzBrowser API isn't reachable. Start WzBrowser.exe, then try again.</p>
+                    ) : (
+                        <div className="space-y-5">
+                            {files && files.length > 10 && (
+                                <input
+                                    aria-label="Filter files"
+                                    autoFocus
+                                    value={query}
+                                    onChange={(e) => setQuery(e.target.value)}
+                                    placeholder={`${files.length} files, type to filter`}
+                                    spellCheck={false}
+                                    className="input"
+                                />
+                            )}
+                            {!files ? (
+                                <div className="space-y-2">{Array.from({ length: 3 }, (_, i) => <div key={i} className="skeleton h-12 rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
+                            ) : files.length === 0 ? (
+                                <p className="text-sm text-zinc-500">{browseOnly ? "The library folder has no quest archives or Etc.wz." : "The library folder has no .wz files or .ms packs."}</p>
+                            ) : (
+                                <ul className="-mx-2 max-h-[50dvh] space-y-1 overflow-y-auto px-2">
+                                    {visible.map((f) => (
+                                        <li key={f.path}>
+                                            <button
+                                                type="button"
+                                                title={f.name}
+                                                disabled={opening !== null}
+                                                onClick={() => openFile(f)}
+                                                className="flex w-full items-center gap-4 rounded-xl border border-zinc-200 px-4 py-3 text-left text-sm transition hover:border-accent-300 hover:bg-accent-50 disabled:opacity-60 dark:border-zinc-800 dark:hover:border-zinc-700 dark:hover:bg-zinc-800/70"
+                                            >
+                                                <Document className="size-5 shrink-0 text-accent-500" />
+                                                <span className="min-w-0 flex-1 truncate font-medium">{labels.get(f.path)}</span>
+                                                {opening === f.path
+                                                    ? <span className="animate-pulse text-xs text-zinc-500">Opening…</span>
+                                                    : f.kind && <span className="shrink-0 text-xs text-zinc-400">{f.kind === "quest" ? "Quests" : "Cash Shop"}</span>}
+                                            </button>
+                                        </li>
+                                    ))}
+                                    {visible.length === 0 && <li className="px-4 py-6 text-center text-sm text-zinc-500">No files match.</li>}
+                                </ul>
+                            )}
+
+                            <div className="flex items-center gap-4">
+                                <span className="text-sm font-medium text-zinc-600 dark:text-zinc-300">Encryption</span>
+                                <div className="w-44"><EncryptionSelect value={encryption} onChange={setEncryption} /></div>
+                            </div>
+
+                            {error && (
+                                <div role="alert" className="alert">
+                                    {error}
+                                </div>
+                            )}
+
+                        </div>
+                    )}
+                </DialogPanel>
             </div>
-            <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800">
-              <XMark className="size-5" />
-            </button>
-          </div>
-
-          {status !== "online" ? (
-            <p className="py-10 text-center text-sm text-zinc-500">The WzBrowser API isn't reachable. Start WzBrowser.exe, then try again.</p>
-          ) : (
-            <div className="space-y-5">
-              {files && files.length > 10 && (
-                <input
-                  aria-label="Filter files"
-                  autoFocus
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder={`${files.length} files, type to filter`}
-                  spellCheck={false}
-                  className={inputClass}
-                />
-              )}
-              {!files ? (
-                <div className="space-y-2">{Array.from({ length: 3 }, (_, i) => <div key={i} className="skeleton h-12 rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
-              ) : files.length === 0 ? (
-                <p className="text-sm text-zinc-500">{browseOnly ? "The library folder has no quest archives or Etc.wz." : "The library folder has no .wz files or .ms packs."}</p>
-              ) : (
-                <ul className="-mx-2 max-h-[50dvh] space-y-1 overflow-y-auto px-2">
-                  {visible.map((f) => (
-                    <li key={f.path}>
-                      <button
-                        type="button"
-                        title={f.name}
-                        disabled={opening !== null}
-                        onClick={() => openFile(f)}
-                        className="flex w-full items-center gap-4 rounded-xl border border-zinc-200 px-4 py-3 text-left text-sm transition hover:border-accent-300 hover:bg-accent-50 disabled:opacity-60 dark:border-zinc-800 dark:hover:border-zinc-700 dark:hover:bg-zinc-800/70"
-                      >
-                        <Document className="size-5 shrink-0 text-accent-500" />
-                        <span className="min-w-0 flex-1 truncate font-medium">{labels.get(f.path)}</span>
-                        {opening === f.path
-                          ? <span className="animate-pulse text-xs text-zinc-500">Opening…</span>
-                          : f.kind && <span className="shrink-0 text-xs text-zinc-400">{f.kind === "quest" ? "Quests" : "Cash Shop"}</span>}
-                      </button>
-                    </li>
-                  ))}
-                  {visible.length === 0 && <li className="px-4 py-6 text-center text-sm text-zinc-500">No files match.</li>}
-                </ul>
-              )}
-
-              <div className="flex items-center gap-4">
-                <span className="text-sm font-medium text-zinc-600 dark:text-zinc-300">Encryption</span>
-                <div className="w-44"><EncryptionSelect value={encryption} onChange={setEncryption} /></div>
-              </div>
-
-              {error && (
-                <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300">
-                  {error}
-                </div>
-              )}
-
-            </div>
-          )}
-        </DialogPanel>
-      </div>
-    </Dialog>
-  );
+        </Dialog>
+    );
 }

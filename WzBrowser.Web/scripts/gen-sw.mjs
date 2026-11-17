@@ -8,19 +8,19 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const out = join(root, "build", "client");
 
 const walk = (dir) =>
-  readdirSync(dir).flatMap((name) => {
-    const p = join(dir, name);
-    return statSync(p).isDirectory() ? walk(p) : [p];
-  });
+    readdirSync(dir).flatMap((name) => {
+        const p = join(dir, name);
+        return statSync(p).isDirectory() ? walk(p) : [p];
+    });
 
 const files = walk(out)
-  .map((p) => relative(out, p).split(sep).join("/"))
-  .filter((f) => f !== "sw.js" && !f.endsWith(".map"))
-  .sort();
+    .map((p) => relative(out, p).split(sep).join("/"))
+    .filter((f) => f !== "sw.js" && !f.endsWith(".map"))
+    .sort();
 
 if (!files.includes("index.html")) {
-  console.error("gen-sw: build/client/index.html is missing - is the Remix build in SPA mode?");
-  process.exit(1);
+    console.error("gen-sw: build/client/index.html is missing - is the Remix build in SPA mode?");
+    process.exit(1);
 }
 
 const hash = createHash("sha1");
@@ -33,7 +33,7 @@ precache.splice(precache.indexOf("/"), 1);
 
 const template = readFileSync(join(root, "scripts", "sw.template.js"), "utf8");
 writeFileSync(
-  join(out, "sw.js"),
-  template.replace("__VERSION__", version).replace("__PRECACHE__", JSON.stringify(precache, null, 2)),
+    join(out, "sw.js"),
+    template.replace("__VERSION__", version).replace("__PRECACHE__", JSON.stringify(precache, null, 2)),
 );
 console.log(`gen-sw: precaching ${precache.length} files (version ${version})`);
