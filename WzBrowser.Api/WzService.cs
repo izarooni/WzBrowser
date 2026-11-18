@@ -521,21 +521,6 @@ public sealed partial class WzService(string? root = null)
         return new PasteResult(newPath, Describe(added), Describe(targetId, target), sourceDto);
     }
 
-    public OpenedFileDto Delete(string id, string path)
-    {
-        var entry = Get(id);
-        lock (entry.Lock)
-        {
-            path = Normalize(path);
-            if (path.Length == 0) throw new InvalidDataException("The file root can't be deleted.");
-            var node = Resolve(entry.File, path);
-            MarkChanged(node);
-            ((WzObject)node).Remove();
-            Touch(entry);
-            return Describe(id, entry);
-        }
-    }
-
     /// <summary>
     /// Renames a property and/or sets its value (numbers, strings, vectors as "x, y", UOL paths). Both are checked
     /// before either is applied, so a bad request leaves the file unchanged.

@@ -50,7 +50,18 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
 
     const [levels, setLevels] = useState<Record<string, Level>>({});
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
-    const [selected, setSelected] = useState<string | null>(null);
+    /** The node the details pane shows and the keyboard moves from. */
+    const [selected, setSelectedOnly] = useState<string | null>(null);
+    /** Every node chosen with Ctrl/Shift+click, `selected` included; empty when only `selected` is chosen. */
+    const [picked, setPicked] = useState<Set<string>>(() => new Set());
+    /** Where a Shift+click range starts: the last node clicked without Shift. */
+    const anchorRef = useRef<string | null>(null);
+    /** Choosing one node drops any multi-selection. */
+    const setSelected = useCallback((path: string | null) => {
+        setSelectedOnly(path);
+        setPicked((cur) => (cur.size ? new Set() : cur));
+        anchorRef.current = path;
+    }, []);
     const [filter, setFilter] = useState("");
     const [hits, setHits] = useState<{ needle: string; paths: Set<string>; ancestors: Set<string> } | null>(null);
     const [dropPath, setDropPath] = useState<string | null>(null);
@@ -290,6 +301,42 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
         if (expanded.has(path)) collapse(path); else expand(path);
     };
 
+    /** Every chosen node: the multi-selection, or just the selected node. */
+    const chosen = useMemo(() => {
+        if (picked.size) return picked;
+        if (selected != null) return new Set([selected]);
+        return new Set<string>();
+    }, [picked, selected]);
+
+    /** Ctrl+click adds or removes a node; Shift+click chooses the visible rows from the anchor to it (Ctrl+Shift adds them). */
+    const onRowPick = (e: MouseEvent, path: string, node: WzNode) => {
+        const toggle = e.ctrlKey || e.metaKey;
+        if (!toggle && !e.shiftKey) return onRowClick(path, node);
+        if (e.shiftKey) {
+            const from = nodeRows.findIndex((r) => r.path === (anchorRef.current ?? selected ?? path));
+            const to = nodeRows.findIndex((r) => r.path === path);
+            let range = [path];
+            if (from >= 0) range = nodeRows.slice(Math.min(from, to), Math.max(from, to) + 1).map((r) => r.path);
+            setPicked(new Set(toggle ? [...chosen, ...range] : range));
+            setSelectedOnly(path);
+            return;
+        }
+        const next = new Set(chosen);
+        anchorRef.current = path;
+        if (next.has(path)) {
+            next.delete(path);
+            // The details pane moves to the most recently chosen node still in the selection.
+            if (selected === path) {
+                const rest = [...next];
+                setSelectedOnly(rest[rest.length - 1] ?? null);
+            }
+        } else {
+            next.add(path);
+            setSelectedOnly(path);
+        }
+        setPicked(next.size > 1 ? next : new Set());
+    };
+
     // ------------------------------------------------------------ clipboard actions
 
     const selectedNode = selected != null ? typeAt(selected) : null;
@@ -377,7 +424,9 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
     const openMenu = (e: MouseEvent<HTMLElement>, path: string) => {
         e.preventDefault();
         e.stopPropagation();
-        if (path) setSelected(path);
+        // Right-clicking inside a multi-selection keeps it.
+        if (path && !chosen.has(path)) setSelected(path);
+        else if (path) setSelectedOnly(path);
         // The menu key and Shift+F10 open it with no pointer position: put it under the row instead.
         const r = e.currentTarget.getBoundingClientRect();
         const keyboard = e.clientX === 0 && e.clientY === 0;
@@ -423,9 +472,43 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
 
     const dropAllowed = (targetPath: string, target: WzNode) => {
         const src = dnd.current;
-        if (!src || !canPaste(src, target)) return false;
-        // Dragging a node onto itself or into its own subtree makes no sense.
-        return !(src.fileId === fileId && (targetPath === src.path || targetPath.startsWith(src.path + "/")));
+        if (!src?.length) return false;
+        // Every dragged node has to fit, and none can go onto itself or into its own subtree.
+        for (const s of src) {
+            if (!canPaste(s, target)) return false;
+            const intoItself = s.fileId === fileId && (targetPath === s.path || targetPath.startsWith(s.path + "/"));
+            if (intoItself) return false;
+        }
+        return true;
+    };
+
+    /** What dragging `path` carries: the whole multi-selection if it's part of one, in tree order, without nodes inside another chosen node. */
+    const dragItems = (path: string, node: WzNode): ClipItem[] => {
+        if (!(picked.size > 1 && picked.has(path))) {
+            setSelected(path);
+            return [{ fileId, path, name: node.name, type: node.type, cut: false }];
+        }
+        const rows = nodeRows.filter((r) => picked.has(r.path));
+        return rows
+            .filter((r) => !rows.some((o) => r.path.startsWith(o.path + "/")))
+            .map((r) => ({ fileId, path: r.path, name: r.node.name, type: r.node.type, cut: false }));
+    };
+
+    const onDragStart = (e: DragEvent, path: string, node: WzNode) => {
+        const items = dragItems(path, node);
+        dnd.current = items;
+        e.dataTransfer.effectAllowed = "copyMove";
+        e.dataTransfer.setData("application/x-wzbrowser-node", JSON.stringify(items));
+        e.dataTransfer.setData("text/plain", items.map((i) => `${file?.name ?? ""}/${i.path}`).join("\n"));
+        if (items.length > 1) {
+            // The browser's picture would only show the row under the pointer, so say how many are going.
+            const ghost = document.createElement("div");
+            ghost.textContent = `${items.length} nodes`;
+            ghost.className = "fixed -left-[999px] top-0 rounded-lg bg-accent-600 px-3 py-1.5 text-[13px] font-semibold text-white shadow-lg";
+            document.body.appendChild(ghost);
+            e.dataTransfer.setDragImage(ghost, -12, -12);
+            setTimeout(() => ghost.remove());
+        }
     };
 
     const dragOverTarget = (e: DragEvent, targetPath: string, target: WzNode) => {
@@ -519,7 +602,8 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
                         }
                         const { node, path, depth } = row;
                         const isOpen = expanded.has(path);
-                        const isSelected = selected === path;
+                        const isSelected = chosen.has(path);
+                        const isFocus = selected === path;
                         const isCut = clipboard?.cut && clipboard.fileId === fileId && clipboard.path === path;
                         return (
                             <button
@@ -531,17 +615,12 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
                                 aria-selected={isSelected}
                                 type="button"
                                 draggable
-                                tabIndex={isSelected || (selected == null && path === nodeRows[0]?.path) ? 0 : -1}
-                                onClick={() => onRowClick(path, node)}
+                                tabIndex={isFocus || (selected == null && path === nodeRows[0]?.path) ? 0 : -1}
+                                onClick={(e) => onRowPick(e, path, node)}
+                                // Keep Shift+click from also selecting the rows' text.
+                                onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}
                                 onContextMenu={(e) => openMenu(e, path)}
-                                onDragStart={(e) => {
-                                    const item: ClipItem = { fileId, path, name: node.name, type: node.type, cut: false };
-                                    dnd.current = item;
-                                    e.dataTransfer.effectAllowed = "copyMove";
-                                    e.dataTransfer.setData("application/x-wzbrowser-node", JSON.stringify(item));
-                                    e.dataTransfer.setData("text/plain", `${file?.name ?? ""}/${path}`);
-                                    setSelected(path);
-                                }}
+                                onDragStart={(e) => onDragStart(e, path, node)}
                                 onDragEnd={() => { dnd.current = null; setDropPath(null); endHover(); }}
                                 onDragOver={(e) => dragOverTarget(e, path, node)}
                                 onDrop={(e) => dropOnTarget(e, path, node)}
@@ -639,7 +718,7 @@ function Detail({ fileId, path, node, fileName, childCount, canPasteHere, onCopy
     if (path == null || !node) {
         return (
             <aside className={`${shell} grid place-items-center p-6 text-center`}>
-                <p className="text-sm leading-6 text-zinc-500">Select a node to see details.<br />Drag nodes to another window to copy them, hold <kbd className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px] dark:bg-zinc-800">Shift</kbd> to move.</p>
+                <p className="text-sm leading-6 text-zinc-500">Select a node to see details. <kbd className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px] dark:bg-zinc-800">Ctrl</kbd>/<kbd className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px] dark:bg-zinc-800">Shift</kbd>+click selects several.<br />Drag nodes to another window to copy them, hold <kbd className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px] dark:bg-zinc-800">Shift</kbd> to move.</p>
             </aside>
         );
     }

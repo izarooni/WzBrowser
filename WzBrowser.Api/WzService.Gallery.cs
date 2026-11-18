@@ -13,8 +13,11 @@ public record GalleryItem(string Path, string Label, string? Title, string Pictu
 /// <param name="Delay">How long the frame shows, in milliseconds.</param>
 public record GalleryFrame(string Picture, int Delay);
 
+/// <summary>One part of a gallery as it is read, so thumbnails show while the rest of the file is still being read.</summary>
+/// <param name="Items">The thumbnails found since the last chunk.</param>
+/// <param name="Done">The last chunk: the whole file has been read.</param>
 /// <param name="Truncated">The file has more than <see cref="WzService.GalleryLimit"/> thumbnails; the rest were left out.</param>
-public record GalleryListing(List<GalleryItem> Items, bool Truncated);
+public record GalleryChunk(List<GalleryItem> Items, bool Done, bool Truncated);
 
 public sealed partial class WzService
 {
@@ -51,32 +54,42 @@ public sealed partial class WzService
         };
     }
 
+    /// <summary>How often a chunk goes out while reading: after this many thumbnails, or this long.</summary>
+    private const int GalleryChunkItems = 300;
+    private static readonly TimeSpan GalleryChunkTime = TimeSpan.FromMilliseconds(150);
+
     /// <summary>
-    /// A _Canvas file as thumbnails. Each thing in it (an .img, or a node inside one: a skill, an item) shows its first
-    /// stand, move or fly frame, else its icon or iconRaw (also under info). Anything else that is a series of numbered
-    /// pictures (0, 1, 2, ...) shows as an animation.
+    /// A _Canvas file as thumbnails, in chunks as its .imgs are read. Each thing in it (an .img, or a node inside one: a
+    /// skill, an item) shows its first stand, move or fly frame, else its icon or iconRaw (also under info). Anything else
+    /// that is a series of numbered pictures (0, 1, 2, ...) shows as an animation. The file is locked one .img at a time,
+    /// so its pictures can be fetched while the rest is still being read.
     /// </summary>
-    public GalleryListing Gallery(string id)
+    public IEnumerable<GalleryChunk> Gallery(string id)
     {
         var entry = Get(id);
         if (entry.Kind != "canvas") throw new InvalidDataException("This file isn't a _Canvas file.");
+        return GalleryChunks(entry);
+    }
 
-        var found = new List<(string Path, bool IsImage, string Picture, List<GalleryFrame>? Frames)>();
-        var truncated = false;
+    private IEnumerable<GalleryChunk> GalleryChunks(Entry entry)
+    {
+        List<(WzImage Image, string Path)> images;
         NameIndex names;
         lock (entry.Lock)
         {
             names = entry.Names ??= new NameIndex(entry.Path, InRoot);
-            foreach (var (img, path) in Images(entry.File.WzDirectory, ""))
-            {
-                Visit(img, path, iconsOnly: false);
-                if (truncated) break;
-            }
+            images = Images(entry.File.WzDirectory, "").ToList();
         }
+        var kind = CanvasNames(entry.Path);
+
+        var found = new List<(string Path, bool IsImage, string Picture, List<GalleryFrame>? Frames)>();
+        var total = 0;
+        var truncated = false;
 
         void Add(string path, object node, string picture, List<GalleryFrame>? frames)
         {
-            if (found.Count >= GalleryLimit) { truncated = true; return; }
+            if (total >= GalleryLimit) { truncated = true; return; }
+            total++;
             found.Add((path, node is WzImage, picture, frames));
         }
 
@@ -111,16 +124,38 @@ public sealed partial class WzService
             if (name.EndsWith(".img", StringComparison.OrdinalIgnoreCase)) name = name[..^4];
             return int.TryParse(name, out var n) ? n : null;
         }
-        var resolved = CanvasNames(entry.Path) is { } kind ? names.Resolve(kind, found.Select(f => IdOf(f.Path)).OfType<int>()) : [];
-        string? NameOf(string path) => IdOf(path) is { } n && resolved.TryGetValue(n, out var name) ? name : null;
 
         // An .img is labelled like a file, with its name on hover; a node inside one by its name, with its path on hover.
-        var items = found.Select(f => f.IsImage
-            ? new GalleryItem(f.Path, f.Path[(f.Path.LastIndexOf('/') + 1)..], NameOf(f.Path), f.Picture, f.Frames)
-            : NameOf(f.Path) is { } name
-                ? new GalleryItem(f.Path, name, f.Path, f.Picture, f.Frames)
-                : new GalleryItem(f.Path, f.Path, null, f.Picture, f.Frames)).ToList();
-        return new GalleryListing(items, truncated);
+        List<GalleryItem> Take()
+        {
+            var resolved = kind != null ? names.Resolve(kind, found.Select(f => IdOf(f.Path)).OfType<int>()) : [];
+            string? NameOf(string path) => IdOf(path) is { } n && resolved.TryGetValue(n, out var name) ? name : null;
+            var items = found.Select(f => f.IsImage
+                ? new GalleryItem(f.Path, f.Path[(f.Path.LastIndexOf('/') + 1)..], NameOf(f.Path), f.Picture, f.Frames)
+                : NameOf(f.Path) is { } name
+                    ? new GalleryItem(f.Path, name, f.Path, f.Picture, f.Frames)
+                    : new GalleryItem(f.Path, f.Path, null, f.Picture, f.Frames)).ToList();
+            found.Clear();
+            return items;
+        }
+
+        var since = System.Diagnostics.Stopwatch.StartNew();
+        foreach (var (img, path) in images)
+        {
+            lock (entry.Lock)
+            {
+                // The file may have been edited between .imgs; one that was removed is just skipped.
+                if (img.Parent == null) continue;
+                Visit(img, path, iconsOnly: false);
+            }
+            if (truncated) break;
+            if (found.Count >= GalleryChunkItems || found.Count > 0 && since.Elapsed >= GalleryChunkTime)
+            {
+                yield return new GalleryChunk(Take(), Done: false, Truncated: false);
+                since.Restart();
+            }
+        }
+        yield return new GalleryChunk(Take(), Done: true, truncated);
     }
 
     /// <summary>Every image in a directory and the ones below it, with its path from the file root.</summary>

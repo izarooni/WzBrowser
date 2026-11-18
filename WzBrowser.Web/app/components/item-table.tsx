@@ -23,7 +23,7 @@ const SLOT_LABEL: Record<string, string> = {
 const SLOTS = Object.keys(SLOT_LABEL);
 
 /** What equipment and scrolls add (info/inc*); a few installs write attack as incWAT. */
-const BONUS: readonly [string, string][] = [
+export const BONUS: readonly [string, string][] = [
     ["incSTR", "STR"], ["incDEX", "DEX"], ["incINT", "INT"], ["incLUK", "LUK"], ["incMHP", "HP"], ["incMMP", "MP"],
     ["incPAD", "Attack"], ["incWAT", "Attack"], ["incMAD", "M. Attack"], ["incPDD", "Defense"], ["incMDD", "M. Defense"],
     ["incACC", "Accuracy"], ["incEVA", "Avoid"], ["incCraft", "Hands"], ["incSpeed", "Speed"], ["incJump", "Jump"],
@@ -34,9 +34,9 @@ const EFFECT: readonly [string, string][] = [
     ["hp", "HP"], ["mp", "MP"], ["pad", "Attack"], ["mad", "M. Attack"], ["pdd", "Defense"], ["mdd", "M. Defense"],
     ["acc", "Accuracy"], ["eva", "Avoid"], ["speed", "Speed"], ["jump", "Jump"], ["indieSpeed", "Speed"], ["indieJump", "Jump"],
 ];
-const REQUIRE: readonly [string, string][] = [["reqSTR", "STR"], ["reqDEX", "DEX"], ["reqINT", "INT"], ["reqLUK", "LUK"], ["reqPOP", "Fame"]];
+export const REQUIRE: readonly [string, string][] = [["reqSTR", "STR"], ["reqDEX", "DEX"], ["reqINT", "INT"], ["reqLUK", "LUK"], ["reqPOP", "Fame"]];
 /** info flags (set to 1) shown as badges beside the name. */
-const FLAGS: readonly [string, string, string][] = [
+export const FLAGS: readonly [string, string, string][] = [
     ["cash", "Cash", "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300"],
     ["quest", "Quest", "bg-sky-100 text-sky-800 dark:bg-sky-500/15 dark:text-sky-300"],
     ["only", "One of a kind", "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300"],
@@ -49,14 +49,14 @@ const FLAGS: readonly [string, string, string][] = [
 
 /** info/reqJob is a mask of classes; 0 is everyone and -1 Beginners only. */
 const JOB_BITS: readonly [number, string][] = [[1, "Warrior"], [2, "Magician"], [4, "Bowman"], [8, "Thief"], [16, "Pirate"]];
-function jobs(mask: number | undefined): string | null {
+export function jobs(mask: number | undefined): string | null {
     if (!mask) return null;
     if (mask === -1) return "Beginner";
     return JOB_BITS.filter(([bit]) => mask & bit).map(([, name]) => name).join(", ") || null;
 }
 
 /** info/attackSpeed as the client words it (2 fastest, 9 slowest). */
-function attackSpeed(n: number): string {
+export function attackSpeed(n: number): string {
     return `${n <= 3 ? "Faster" : n <= 5 ? "Fast" : n === 6 ? "Normal" : n <= 8 ? "Slow" : "Slower"} (${n})`;
 }
 

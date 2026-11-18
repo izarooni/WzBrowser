@@ -41,6 +41,26 @@ internal static class WzLayout
             .Select(d => System.IO.Path.GetFileName(d)).Order(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
+    /// <summary>
+    /// Where a path in an archive would be in a classic install: the file's name there ("Item") and the path inside it.
+    /// A modular part's folders lead the path, so Data/Item/Consume/Consume_000.wz's "0200.img" is Item's "Consume/0200.img".
+    /// </summary>
+    public static (string Top, string Path) Classic(string archivePath, string path)
+    {
+        var dir = System.IO.Path.GetDirectoryName(archivePath)!;
+        if (DataRoot(archivePath) is { } root)
+        {
+            var rel = System.IO.Path.GetRelativePath(root, dir)
+                .Split([System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+            if (rel.Length > 0 && rel[0] is not ("." or ".."))
+                return (rel[0], string.Join('/', rel.Skip(1).Append(path).Where(s => s.Length > 0)));
+        }
+        // Classic, or a renamed copy (Item.bak.wz, Item_old.wz), or an .ms pack.
+        var stem = System.IO.Path.GetFileNameWithoutExtension(archivePath);
+        var cut = stem.IndexOfAny(['.', '_']);
+        return (cut > 0 ? stem[..cut] : stem, path);
+    }
+
     /// <summary>The Data folder of a modular install (the one holding String/String.ini), found by walking up from the archive.</summary>
     private static string? DataRoot(string archivePath)
     {

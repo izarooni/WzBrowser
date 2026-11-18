@@ -195,7 +195,8 @@ api.MapGet("/files/{id}/search", (string id, string q, int? depth, WzService wz)
 api.MapGet("/files/{id}/node",(string id, string? path, WzService wz) => wz.Node(id, path));
 // Edits live in memory until saved; Save always writes a new file.
 api.MapPost("/files/{id}/paste", (string id, PasteRequest req, WzService wz) => wz.Paste(id, req));
-api.MapDelete("/files/{id}/node", (string id, string path, WzService wz) => wz.Delete(id, path));
+// strings=true also deletes String's names for what the node is (an item, mob, NPC, map or skill, or a folder of them).
+api.MapDelete("/files/{id}/node", (string id, string path, bool? strings, WzService wz) => wz.Delete(id, path, strings ?? false));
 api.MapPatch("/files/{id}/node", (string id, NodeEditRequest req, WzService wz) => wz.EditNode(id, req));
 api.MapPost("/files/{id}/node", (string id, NodeCreateRequest req, WzService wz) => wz.CreateNode(id, req));
 api.MapPost("/files/{id}/save", (string id, SaveRequest? req, WzService wz) => wz.Save(id, req?.Path));
@@ -226,10 +227,41 @@ api.MapGet("/files/{id}/preview", (string id, string kind, int refId, HttpContex
     return Results.File(png, "image/png");
 });
 // A _Canvas file as thumbnails: each thing's first stand, move or fly frame, else its icon; other numbered series animate.
-api.MapGet("/files/{id}/gallery", (string id, WzService wz) => wz.Gallery(id));
+// Sent as it is read, a JSON GalleryChunk per line, so the thumbnails found so far show while the rest load.
+api.MapGet("/files/{id}/gallery", async (string id, HttpContext ctx, WzService wz,
+    Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions> json) =>
+{
+    var chunks = wz.Gallery(id).GetEnumerator(); // a file that isn't a _Canvas file throws here, as a plain error
+    var abort = ctx.RequestAborted;
+    ctx.Response.ContentType = "application/x-ndjson";
+    try
+    {
+        // Reading .imgs blocks, so it runs off the request's thread.
+        while (!abort.IsCancellationRequested && await Task.Run(chunks.MoveNext, abort))
+        {
+            await System.Text.Json.JsonSerializer.SerializeAsync(ctx.Response.Body, chunks.Current, json.Value.SerializerOptions, abort);
+            await ctx.Response.Body.WriteAsync("\n"u8.ToArray(), abort);
+            await ctx.Response.Body.FlushAsync(abort);
+        }
+    }
+    catch (OperationCanceledException) { /* the page stopped listening */ }
+    catch (Exception ex)
+    {
+        // Too late for an error status; the page reads this line as the error.
+        await System.Text.Json.JsonSerializer.SerializeAsync(ctx.Response.Body, new { error = ex.Message }, json.Value.SerializerOptions);
+        await ctx.Response.Body.WriteAsync("\n"u8.ToArray());
+    }
+    finally { chunks.Dispose(); }
+});
 // Character.wz as thumbnails, a section (Weapon, Cap, ...) at a time, with String's names, which can be edited in String.
 api.MapGet("/files/{id}/character", (string id, WzService wz) => wz.CharacterSections(id));
 api.MapGet("/files/{id}/character/items", (string id, string? section, WzService wz) => wz.CharacterSectionItems(id, section));
+// Each item's picture and info are fetched on their own, so a section lists at once and pictures load as they scroll in.
+api.MapGet("/files/{id}/character/picture", (string id, string path, WzService wz) =>
+    wz.CharacterPicture(id, path) is { } png ? Results.File(png, "image/png") : Results.NotFound());
+// 204 when the item has no info.
+api.MapGet("/files/{id}/character/info", (string id, string path, WzService wz) =>
+    wz.CharacterInfo(id, path) is { } info ? Results.Ok(info) : Results.NoContent());
 api.MapPut("/files/{id}/character/strings", (string id, CharacterStringRequest req, WzService wz) => wz.SetCharacterStrings(id, req));
 api.MapGet("/files/{id}/png", (string id, string path, WzService wz) =>
     Results.File(wz.Png(id, path), "image/png"));

@@ -1,17 +1,19 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
-import type { CharacterItem, CharacterSection } from "../lib/api";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { CharacterItem, CharacterSection, PropTree } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { parentPath } from "../lib/paths";
 import { useActions, useWorkspaceData } from "../lib/workspace";
 import { SizePicker, SIZES, Thumbnail, useThumbnailSize } from "./canvas-gallery";
 import { Photo, Search, XMark } from "./icons";
+import { attackSpeed, BONUS, FLAGS, jobs, REQUIRE } from "./item-table";
 
 const SECTION_KEY = "wzbrowser.characterSection";
 
 /**
  * Character.wz as thumbnails, one section (Weapon, Cap, Coat, ...) at a time, picked from a menu down the side. Clicking
- * an item shows it beside the grid with String's name and description, which can be edited: that opens String.wz, where
- * the change waits to be saved. Double-click (or Enter, or the details' button) shows the item in the raw tree.
+ * an item shows it beside the grid with its info (stats, price, requirements) and String's name and description, which can
+ * be edited: that opens String.wz, where the change waits to be saved. The list comes from names alone; each picture is
+ * fetched as its thumbnail scrolls into view. Double-click (or Enter, or the details' button) shows the item in the raw tree.
  */
 export const CharacterBrowser = memo(function CharacterBrowser({ fileId, revision, onOpenRaw }: {
     fileId: string;
@@ -129,11 +131,11 @@ export const CharacterBrowser = memo(function CharacterBrowser({ fileId, revisio
                                         path: item.path,
                                         label: item.name ?? fileName(item.path),
                                         title: item.name ? `${fileName(item.path)}` : null,
-                                        picture: item.picture,
+                                        picture: item.path,
                                         frames: null,
                                     }}
                                     box={box}
-                                    url={(path) => api.pngUrl(fileId, path, revision)}
+                                    url={(path) => api.characterPictureUrl(fileId, path, revision)}
                                     selected={selected === item.path}
                                     onSelect={() => setSelected(item.path)}
                                     onOpen={onOpenRaw ? () => onOpenRaw(item.path) : undefined}
@@ -153,6 +155,11 @@ export const CharacterBrowser = memo(function CharacterBrowser({ fileId, revisio
                     item={current}
                     onOpenRaw={onOpenRaw}
                     onClose={() => setSelected(null)}
+                    onDeleted={() => {
+                        setSelected(null);
+                        // Character's revision changes too, which refetches the menu's counts and the list.
+                        setListing((l) => l && { ...l, items: l.items.filter((i) => i.path !== current.path) });
+                    }}
                     onSaved={(updated, stringFileId, stringRev) => {
                         ownRevisions.current.add(stringRev);
                         setListing((l) => l && {
@@ -169,13 +176,14 @@ export const CharacterBrowser = memo(function CharacterBrowser({ fileId, revisio
 
 const fileName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
-function Details({ fileId, revision, section, item, onOpenRaw, onClose, onSaved }: {
+function Details({ fileId, revision, section, item, onOpenRaw, onClose, onDeleted, onSaved }: {
     fileId: string;
     revision: number;
     section: string;
     item: CharacterItem;
     onOpenRaw?: (path: string) => void;
     onClose: () => void;
+    onDeleted: () => void;
     onSaved: (item: CharacterItem, stringFileId: string, stringRevision: number) => void;
 }) {
     const { api, readOnly } = useConnection();
@@ -183,9 +191,23 @@ function Details({ fileId, revision, section, item, onOpenRaw, onClose, onSaved 
     const [name, setName] = useState(item.name ?? "");
     const [desc, setDesc] = useState(item.desc ?? "");
     const [saving, setSaving] = useState(false);
+    const [deleting, setDeleting] = useState(false);
     const [failed, setFailed] = useState(false);
     const changed = name !== (item.name ?? "") || desc !== (item.desc ?? "");
     const editable = !readOnly && item.id != null;
+    // undefined while loading; null when the item has no info.
+    const [info, setInfo] = useState<PropTree | null | undefined>(undefined);
+    const [infoError, setInfoError] = useState<string | null>(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        setInfoError(null);
+        api.characterInfo(fileId, item.path).then(
+            (t) => { if (!cancelled) setInfo(t ?? null); },
+            (e) => { if (!cancelled) setInfoError(e instanceof Error ? e.message : String(e)); },
+        );
+        return () => { cancelled = true; };
+    }, [api, fileId, item.path, revision]);
 
     const save = async () => {
         if (item.id == null || !changed) return;
@@ -205,13 +227,23 @@ function Details({ fileId, revision, section, item, onOpenRaw, onClose, onSaved 
         }
     };
 
+    const remove = async () => {
+        setDeleting(true);
+        const deleted = await actions.deleteNode(fileId, item.path, item.name ? `${item.name} (${fileName(item.path)})` : fileName(item.path), {
+            strings: true,
+            body: `Its .img is removed from this file${item.stringPath ? ", and its name and description from String" : ""}, in memory only. Nothing on disk changes until you save${item.stringPath ? " each file" : ""}, and Revert discards the edits.`,
+        });
+        if (deleted) onDeleted();
+        else setDeleting(false);
+    };
+
     return (
         <aside aria-label="Item details" className="flex w-72 shrink-0 flex-col overflow-y-auto border-l border-zinc-100 dark:border-zinc-800">
             <div className="flex items-start gap-3 border-b border-zinc-100 p-4 dark:border-zinc-800">
                 <span className="grid size-20 shrink-0 place-items-center rounded-xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950">
-                    {item.picture && !failed ? (
+                    {!failed ? (
                         <img
-                            src={api.pngUrl(fileId, item.picture, revision)}
+                            src={api.characterPictureUrl(fileId, item.path, revision)}
                             alt=""
                             draggable={false}
                             onError={() => setFailed(true)}
@@ -227,6 +259,13 @@ function Details({ fileId, revision, section, item, onOpenRaw, onClose, onSaved 
                 </div>
                 <button type="button" onClick={onClose} aria-label="Close details" className="btn-icon -mr-1 -mt-1"><XMark className="size-4" /></button>
             </div>
+
+            <section aria-label="Info" className="border-b border-zinc-100 p-4 dark:border-zinc-800">
+                {infoError ? <p className="error-text text-xs">{infoError}</p>
+                    : info === undefined ? <div className="space-y-1.5">{Array.from({ length: 4 }, (_, i) => <div key={i} className="skeleton h-4 rounded bg-zinc-100 dark:bg-zinc-800" />)}</div>
+                    : info === null ? <p className="text-xs text-zinc-400">This has no info.</p>
+                    : <InfoView info={info} />}
+            </section>
 
             <form className="flex flex-col gap-4 p-4" onSubmit={(e) => { e.preventDefault(); void save(); }}>
                 <label className="space-y-1.5">
@@ -255,8 +294,107 @@ function Details({ fileId, revision, section, item, onOpenRaw, onClose, onSaved 
                     {onOpenRaw && (
                         <button type="button" onClick={() => onOpenRaw(item.path)} className="btn-secondary px-4 py-2 text-[13px]">Show in raw tree</button>
                     )}
+                    {!readOnly && (
+                        <button type="button" onClick={() => void remove()} disabled={deleting} className="btn-secondary px-4 py-2 text-[13px] text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40"
+                            title="Deletes the .img and String's entry for it, in memory, to be saved from each file's window">
+                            {deleting ? "Deleting…" : "Delete"}
+                        </button>
+                    )}
                 </div>
             </form>
         </aside>
+    );
+}
+
+/** info's numbers directly under it, by trimmed name (some installs write "reqLevel " beside "reqLevel"). */
+function numbers(info: PropTree): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const c of info.children ?? []) {
+        const key = c.name.trim();
+        if (!c.children && c.value != null && /^-?\d+$/.test(c.value.trim()) && !(key in out)) out[key] = Number(c.value);
+    }
+    return out;
+}
+
+/** Pictures, positions and sounds: nothing to read in a list of values. */
+const HIDDEN_TYPES = new Set(["canvas", "uol", "vector", "convex", "sound"]);
+
+const num = (n: number) => n.toLocaleString();
+const signed = (n: number) => (n < 0 ? num(n) : `+${num(n)}`);
+
+function Row({ label, title, children }: { label: string; title?: string; children: ReactNode }) {
+    return (
+        <div className="flex items-baseline justify-between gap-3 py-0.5" title={title}>
+            <dt className="text-zinc-500">{label}</dt>
+            <dd className="text-right font-medium tabular-nums text-zinc-800 dark:text-zinc-200">{children}</dd>
+        </div>
+    );
+}
+
+function Group({ title, children }: { title: string; children: ReactNode[] }) {
+    if (children.length === 0) return null;
+    return (
+        <div className="space-y-1">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">{title}</h3>
+            <dl className="text-[13px]">{children}</dl>
+        </div>
+    );
+}
+
+/** An item's info as the game words it (flags, requirements, what it adds, price), then every value as written. */
+function InfoView({ info }: { info: PropTree }) {
+    const s = numbers(info);
+    const flags = FLAGS.filter(([key]) => s[key]);
+
+    const required: ReactNode[] = [];
+    if (s.reqLevel) required.push(<Row key="reqLevel" label="Level" title="info/reqLevel">{num(s.reqLevel)}</Row>);
+    for (const [key, label] of REQUIRE) if (s[key]) required.push(<Row key={key} label={label} title={`info/${key}`}>{num(s[key])}</Row>);
+    const job = jobs(s.reqJob);
+    if (job) required.push(<Row key="reqJob" label="Job" title="info/reqJob">{job}</Row>);
+
+    const bonus: ReactNode[] = [];
+    for (const [key, label] of BONUS) if (s[key]) bonus.push(<Row key={key} label={label} title={`info/${key}`}>{signed(s[key])}</Row>);
+
+    const other: ReactNode[] = [];
+    if (s.tuc) other.push(<Row key="tuc" label="Upgrade slots" title="info/tuc">{num(s.tuc)}</Row>);
+    if (s.attackSpeed) other.push(<Row key="attackSpeed" label="Attack speed" title="info/attackSpeed">{attackSpeed(s.attackSpeed)}</Row>);
+    if (s.price) other.push(<Row key="price" label="Price" title="info/price: what a shop pays for it">{num(s.price)} mesos</Row>);
+    if (s.slotMax && s.slotMax > 1) other.push(<Row key="slotMax" label="Stacks to" title="info/slotMax">{num(s.slotMax)}</Row>);
+
+    const all = (info.children ?? []).filter((c) => !HIDDEN_TYPES.has(c.type));
+
+    return (
+        <div className="space-y-4">
+            {flags.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                    {flags.map(([key, label, cls]) => <span key={key} className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${cls}`}>{label}</span>)}
+                </div>
+            )}
+            <Group title="Requires">{required}</Group>
+            <Group title="Stats">{bonus}</Group>
+            <Group title="Other">{other}</Group>
+            {all.length > 0 && (
+                <details className="text-[12px]">
+                    <summary className="cursor-pointer select-none text-[11px] font-semibold uppercase tracking-wide text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">
+                        All info ({all.length})
+                    </summary>
+                    <ul className="mt-1.5 space-y-0.5 font-mono">{all.map((c) => <InfoNode key={c.name} node={c} />)}</ul>
+                </details>
+            )}
+        </div>
+    );
+}
+
+/** One raw info value, with what's below it indented. */
+function InfoNode({ node }: { node: PropTree }) {
+    const kids = (node.children ?? []).filter((c) => !HIDDEN_TYPES.has(c.type));
+    return (
+        <li>
+            <span className="flex items-baseline justify-between gap-3">
+                <span className="truncate text-zinc-500" title={node.type}>{node.name}</span>
+                {node.value != null && !node.children && <span className="break-all text-right text-zinc-800 dark:text-zinc-200">{node.value}</span>}
+            </span>
+            {kids.length > 0 && <ul className="ml-3 space-y-0.5 border-l border-zinc-100 pl-2 dark:border-zinc-800">{kids.map((c) => <InfoNode key={c.name} node={c} />)}</ul>}
+        </li>
     );
 }

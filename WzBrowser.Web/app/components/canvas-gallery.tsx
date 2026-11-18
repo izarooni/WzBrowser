@@ -43,7 +43,7 @@ export function SizePicker({ size, onChange }: { size: Size; onChange: (s: Size)
 /**
  * A _Canvas file as a folder of thumbnails, named underneath like files. Each thing shows its first stand, move or fly
  * frame, else its icon; any other numbered series of pictures plays as an animation. Double-click (or Enter) shows the
- * thing in the raw tree.
+ * thing in the raw tree. Thumbnails show as the server finds them, and each picture loads as it scrolls into view.
  */
 export const CanvasGallery = memo(function CanvasGallery({ fileId, revision, onOpenRaw }: {
     fileId: string;
@@ -51,19 +51,29 @@ export const CanvasGallery = memo(function CanvasGallery({ fileId, revision, onO
     onOpenRaw?: (path: string) => void;
 }) {
     const { api, status } = useConnection();
-    const [listing, setListing] = useState<{ items: GalleryItem[]; truncated: boolean } | null>(null);
+    const [listing, setListing] = useState<{ items: GalleryItem[]; done: boolean; truncated: boolean } | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [size, changeSize] = useThumbnailSize();
     const [selected, setSelected] = useState<string | null>(null);
 
     useEffect(() => {
         if (status !== "online") return;
-        let cancelled = false;
-        api.gallery(fileId).then(
-            (l) => { if (!cancelled) { setListing(l); setError(null); } },
-            (e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); },
-        );
-        return () => { cancelled = true; };
+        const aborter = new AbortController();
+        // The previous listing stays up until the first chunk of the new one replaces it.
+        let first = true;
+        api.gallery(fileId, (chunk) => {
+            const replace = first;
+            first = false;
+            setListing((l) => ({
+                items: replace || !l ? chunk.items : [...l.items, ...chunk.items],
+                done: chunk.done,
+                truncated: chunk.truncated,
+            }));
+            setError(null);
+        }, aborter.signal).catch((e) => {
+            if (!aborter.signal.aborted) setError(e instanceof Error ? e.message : String(e));
+        });
+        return () => aborter.abort();
     }, [api, status, fileId, revision]);
 
     const items = listing?.items;
@@ -76,7 +86,7 @@ export const CanvasGallery = memo(function CanvasGallery({ fileId, revision, onO
             <div className="flex shrink-0 items-center gap-3 border-b border-zinc-100 px-4 py-2 dark:border-zinc-800">
                 <span className="flex-1 text-xs text-zinc-500">
                     {items
-                        ? `${items.length.toLocaleString()} item${items.length === 1 ? "" : "s"}${listing!.truncated ? " (the rest are left out)" : ""}`
+                        ? `${items.length.toLocaleString()} item${items.length === 1 ? "" : "s"}${listing!.truncated ? " (the rest are left out)" : ""}${listing!.done || error ? "" : ", finding more…"}`
                         : error ? "" : "Loading…"}
                 </span>
                 <SizePicker size={size} onChange={changeSize} />
@@ -84,7 +94,7 @@ export const CanvasGallery = memo(function CanvasGallery({ fileId, revision, onO
 
             <div className="min-h-0 flex-1 overflow-auto p-3" onClick={(e) => { if (e.target === e.currentTarget) setSelected(null); }}>
                 {error && <p className="p-6 text-center text-sm text-rose-600 dark:text-rose-400">{error}</p>}
-                {items?.length === 0 && <p className="p-6 text-center text-sm text-zinc-500">This file has no pictures.</p>}
+                {items?.length === 0 && listing!.done && <p className="p-6 text-center text-sm text-zinc-500">This file has no pictures.</p>}
                 {items && items.length > 0 && (
                     <div role="listbox" aria-label="Pictures" className="grid gap-1" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${tile + 12}px, 1fr))` }}>
                         {items.map((item) => (

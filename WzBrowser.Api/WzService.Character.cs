@@ -8,12 +8,12 @@ namespace WzBrowser.Api;
 /// <param name="Count">How many .imgs are in it and the directories below it.</param>
 public record CharacterSection(string Path, string Label, int Count);
 
-/// <param name="Path">The .img, from the file root ("Weapon/01302000.img").</param>
-/// <param name="Picture">The canvas to show for it (info/icon, else its first picture), or null when it has none.</param>
+/// <param name="Path">The .img, from the file root ("Weapon/01302000.img"). Its picture is fetched on its own
+/// (<see cref="WzService.CharacterPicture(string, string)"/>), so listing a section doesn't read every .img.</param>
 /// <param name="Name">String's name for it, or null.</param>
 /// <param name="Desc">String's description, or null.</param>
 /// <param name="StringPath">Where String keeps its name and description ("Eqp.img/Eqp/Weapon/1302000"), or null.</param>
-public record CharacterItem(string Path, int? Id, string? Picture, string? Name, string? Desc, string? StringPath);
+public record CharacterItem(string Path, int? Id, string? Name, string? Desc, string? StringPath);
 
 /// <param name="StringFileId">The String file the names came from (opened hidden), so the view can refetch after it changes.</param>
 public record CharacterItems(List<CharacterItem> Items, string? StringFileId);
@@ -23,6 +23,7 @@ public record CharacterStringRequest(int Id, string Section, string? Name, strin
 /// <param name="File">The String file, now listed as open and with unsaved changes.</param>
 /// <param name="Path">The item's node in it.</param>
 public record CharacterStringResult(OpenedFileDto File, string Path, string? Name, string? Desc);
+
 
 public sealed partial class WzService
 {
@@ -73,11 +74,11 @@ public sealed partial class WzService
         }
     }
 
-    /// <summary>One section's .imgs with a picture each and String's name and description, by id.</summary>
+    /// <summary>One section's .imgs with String's name and description, by id. Only names are read, not the .imgs.</summary>
     public CharacterItems CharacterSectionItems(string id, string? section)
     {
         var entry = GetCharacter(id);
-        var found = new List<(string Path, int? Id, string? Picture)>();
+        var found = new List<(string Path, int? Id)>();
         lock (entry.Lock)
         {
             var dir = Resolve(entry.File, section) switch
@@ -87,25 +88,52 @@ public sealed partial class WzService
                 _ => throw new InvalidDataException("Not a folder of this file."),
             };
             var prefix = Normalize(section) is { Length: > 0 } s ? s + "/" : "";
-            foreach (var (img, path) in Images(dir, prefix))
-            {
-                var wasParsed = img.Parsed;
-                if (!wasParsed) img.ParseImage();
-                var picture = CharacterPicture(img) is { } rel ? $"{path}/{rel}" : null;
-                // Edited images are always parsed, so only ones read just for this go back to unread.
-                if (!wasParsed) img.UnparseImage();
-                found.Add((path, IdOfImage(img.Name), picture));
-            }
+            foreach (var (img, path) in Images(dir, prefix)) found.Add((path, IdOfImage(img.Name)));
         }
 
         var (strings, stringFileId) = EquipStrings(entry.Path);
         var items = found
             .Select(f => f.Id is { } n && strings.TryGetValue(n, out var s)
-                ? new CharacterItem(f.Path, f.Id, f.Picture, s.Name, s.Desc, s.Path)
-                : new CharacterItem(f.Path, f.Id, f.Picture, null, null, null))
+                ? new CharacterItem(f.Path, f.Id, s.Name, s.Desc, s.Path)
+                : new CharacterItem(f.Path, f.Id, null, null, null))
             .OrderBy(i => i.Id ?? int.MaxValue).ThenBy(i => i.Path, StringComparer.OrdinalIgnoreCase)
             .ToList();
         return new CharacterItems(items, stringFileId);
+    }
+
+    /// <summary>An item's picture as a PNG (see <see cref="CharacterPicture(WzImage)"/>), or null when it has none.</summary>
+    public byte[]? CharacterPicture(string id, string path)
+    {
+        var entry = GetCharacter(id);
+        lock (entry.Lock)
+        {
+            if (Resolve(entry.File, path) is not WzImage img) throw new KeyNotFoundException("Not an .img of this file.");
+            var wasParsed = img.Parsed;
+            if (!wasParsed) img.ParseImage();
+            try
+            {
+                return CharacterPicture(img) is { } rel && img.GetFromPath(rel.TrimEnd('/')) is { } canvas ? RenderCanvas(entry, canvas) : null;
+            }
+            finally
+            {
+                // Edited images are always parsed, so only ones read just for this go back to unread.
+                if (!wasParsed) img.UnparseImage();
+            }
+        }
+    }
+
+    /// <summary>An item's info (stats, price, requirements, ...) with everything below it, or null when it has none.</summary>
+    public PropTree? CharacterInfo(string id, string path)
+    {
+        var entry = GetCharacter(id);
+        lock (entry.Lock)
+        {
+            if (Resolve(entry.File, path) is not WzImage img) throw new KeyNotFoundException("Not an .img of this file.");
+            var wasParsed = img.Parsed;
+            if (!wasParsed) img.ParseImage();
+            try { return img["info"] is { } info ? ToTree(info) : null; }
+            finally { if (!wasParsed) img.UnparseImage(); }
+        }
     }
 
     private static int? IdOfImage(string name) =>
@@ -138,24 +166,9 @@ public sealed partial class WzService
         return null;
     }
 
-    /// <summary>
-    /// The String files next to a Character file that hold Eqp.img, opened as (hidden) open files so edits made through
-    /// <see cref="SetCharacterStrings"/> show here and can be saved from String's own window.
-    /// </summary>
-    private IEnumerable<(string Id, Entry Entry, WzImage Eqp)> EquipStringFiles(string characterPath)
-    {
-        if (WzLayout.Find(characterPath, "String", "") is not var (files, _)) yield break;
-        foreach (var path in files.Where(InRoot))
-        {
-            OpenedFileDto dto;
-            try { dto = Open(path, null, hidden: true); }
-            catch { continue; }
-            var entry = Get(dto.Id);
-            WzImage? eqp;
-            lock (entry.Lock) eqp = entry.File.WzDirectory.GetImageByName(EqpImg);
-            if (eqp != null) yield return (dto.Id, entry, eqp);
-        }
-    }
+    /// <summary>The String files next to a Character file that hold Eqp.img (see <see cref="StringImages"/>).</summary>
+    private IEnumerable<(string Id, Entry Entry, WzImage Eqp)> EquipStringFiles(string characterPath) =>
+        StringImages(characterPath, EqpImg);
 
     /// <summary>Every equipment entry in String's Eqp.img (by id: its node's path, name and description), and that file's id.</summary>
     private (Dictionary<int, (string Path, string? Name, string? Desc)> Strings, string? FileId) EquipStrings(string characterPath)
@@ -202,17 +215,7 @@ public sealed partial class WzService
 
         lock (entry.Lock)
         {
-            WzSubProperty? FindEntry(IEnumerable<WzImageProperty> nodes)
-            {
-                foreach (var node in nodes)
-                {
-                    if (int.TryParse(node.Name, out var n)) { if (n == req.Id && node is WzSubProperty sub) return sub; }
-                    else if (node.WzProperties is { Count: > 0 } children && FindEntry(children) is { } hit) return hit;
-                }
-                return null;
-            }
-
-            var item = FindEntry(eqp.WzProperties);
+            var item = FindStringEntry(eqp.WzProperties, req.Id);
             if (item == null)
             {
                 var section = Normalize(req.Section);
@@ -243,13 +246,7 @@ public sealed partial class WzService
             Touch(entry);
             entry.Hidden = false;
 
-            var path = item.Name;
-            for (var p = item.Parent; p != null; p = p.Parent)
-            {
-                if (p is WzImage img) { path = $"{img.Name}/{path}"; break; }
-                path = $"{p.Name}/{path}";
-            }
-            return new CharacterStringResult(Describe(fileId, entry), path, Text(item["name"]), Text(item["desc"]));
+            return new CharacterStringResult(Describe(fileId, entry), PathInImage(item), Text(item["name"]), Text(item["desc"]));
         }
     }
 }

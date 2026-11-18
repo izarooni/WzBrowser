@@ -57,13 +57,12 @@ export interface GalleryItem {
 export interface CharacterSection { path: string; label: string; count: number }
 
 /**
- * One .img of a Character file. `picture`: the canvas to show (its icon, else its first picture); `name`/`desc`: String's;
- * `stringPath`: where String keeps them, or null when it has no entry for the item.
+ * One .img of a Character file. Its picture comes from `characterPictureUrl` and its stats from `characterInfo`, fetched
+ * as needed. `name`/`desc`: String's; `stringPath`: where String keeps them, or null when it has no entry for the item.
  */
 export interface CharacterItem {
     path: string;
     id: number | null;
-    picture: string | null;
     name: string | null;
     desc: string | null;
     stringPath: string | null;
@@ -206,6 +205,8 @@ export const ENCRYPTIONS =["Auto", "GMS", "EMS", "BMS", "CLASSIC", "GETFROMZLZ"]
  * e.g. `{ "apiBase": "/" }` for an API proxied under this site's own /api), else {@link DEFAULT_API_BASE}.
  */
 export async function loadDefaultApiBase(): Promise<string> {
+    // The dev server has no config.json and would log a failed route match for it.
+    if (import.meta.env.DEV) return DEFAULT_API_BASE;
     try {
         const res = await fetch("/config.json", { cache: "no-store" });
         if (res.ok) {
@@ -320,14 +321,53 @@ export function createApi(base: string) {
         quests: (id: string) => request<QuestSummary[]>(`/api/files/${id}/quests`),
         /**
          * A _Canvas file's thumbnails: each thing's first stand, move or fly frame, else its icon or iconRaw; other numbered
-         * series of pictures as animations. `truncated`: there were too many, and the rest were left out.
+         * series of pictures as animations, passed to `onChunk` as the server finds them; the last chunk has `done`.
+         * `truncated`: there were too many, and the rest were left out. Resolves after the last chunk.
          */
-        gallery: (id: string) => request<{ items: GalleryItem[]; truncated: boolean }>(`/api/files/${id}/gallery`),
+        gallery: async (id: string, onChunk: (chunk: { items: GalleryItem[]; done: boolean; truncated: boolean }) => void, signal: AbortSignal) => {
+            // The server sends a JSON chunk per line as it reads the file, so the first thumbnails show before the last are found.
+            let res: Response;
+            try {
+                res = await fetch(`${base}/api/files/${id}/gallery`, { signal });
+            } catch (e) {
+                if (signal.aborted) throw e;
+                throw new ApiError(`Cannot reach the WzBrowser API at ${base}`, 0);
+            }
+            if (!res.ok || !res.body) {
+                let message = res.statusText;
+                try { message = (await res.json()).error ?? message; } catch { /* not json */ }
+                throw new ApiError(message, res.status);
+            }
+            const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+            let buffered = "";
+            const line = (text: string) => {
+                if (!text.trim()) return;
+                const chunk = JSON.parse(text);
+                if (chunk.error) throw new ApiError(chunk.error, 500);
+                onChunk(chunk);
+            };
+            for (;;) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buffered += value;
+                let end;
+                while ((end = buffered.indexOf("\n")) >= 0) {
+                    line(buffered.slice(0, end));
+                    buffered = buffered.slice(end + 1);
+                }
+            }
+            line(buffered);
+        },
         /** A Character file's menu: each directory at its root, and the root itself when it holds .imgs. */
         characterSections: (id: string) => request<CharacterSection[]>(`/api/files/${id}/character`),
         /** One section's .imgs with String's names; `stringFileId` is the String file those came from. */
         characterItems: (id: string, section: string) =>
             request<{ items: CharacterItem[]; stringFileId: string | null }>(`/api/files/${id}/character/items?section=${q(section)}`),
+        /** An item's picture (its icon, else its first picture); 404 when it has none. `revision` busts the browser's cache after edits. */
+        characterPictureUrl: (id: string, path: string, revision?: number) =>
+            `${base}/api/files/${id}/character/picture?path=${q(path)}${revision != null ? `&v=${revision}` : ""}`,
+        /** An item's info node (stats, price, requirements, ...) with everything below it; undefined when it has none. */
+        characterInfo: (id: string, path: string) => request<PropTree | undefined>(`/api/files/${id}/character/info?path=${q(path)}`),
         /** Sets an item's name and description in String's Eqp.img (adding its entry when missing); String is then listed as open. */
         setCharacterStrings: (id: string, body: { id: number; section: string; name: string; desc: string }) =>
             request<{ file: OpenedFile; path: string; name: string | null; desc: string | null }>(`/api/files/${id}/character/strings`, {
@@ -403,7 +443,13 @@ export function createApi(base: string) {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(body),
             }),
-        deleteNode: (id: string, path: string) => request<OpenedFile>(`/api/files/${id}/node?path=${q(path)}`, { method: "DELETE" }),
+        /**
+         * Deletes a node. `strings`: also delete String's names for what it is (an item, mob, NPC, map or skill, or a folder
+         * of them); `strings` in the result lists the String files changed, each now open with unsaved changes.
+         */
+        deleteNode: (id: string, path: string, strings = false) =>
+            request<{ file: OpenedFile; strings: { file: OpenedFile; paths: string[] }[] }>(
+                `/api/files/${id}/node?path=${q(path)}${strings ? "&strings=true" : ""}`, { method: "DELETE" }),
         /** Renames a property and/or sets its value. */
         editNode: (id: string, path: string, edit: NodeEdit) =>
             request<NodeEditResult>(`/api/files/${id}/node`, {

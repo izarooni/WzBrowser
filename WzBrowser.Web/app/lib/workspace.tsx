@@ -75,8 +75,8 @@ export interface TreeEvent {
     reloadUnder?: string;
 }
 
-/** The node being dragged right now. Drag data can't be read during dragover, so it's kept here. */
-export const dnd: { current: ClipItem | null } = { current: null };
+/** The nodes being dragged right now. Drag data can't be read during dragover, so it's kept here. */
+export const dnd: { current: ClipItem[] | null } = { current: null };
 
 interface Toast { id: number; kind: "info" | "success" | "error"; text: string }
 interface ConfirmOptions { title: string; body: string; confirmLabel: string; danger?: boolean }
@@ -95,8 +95,13 @@ interface Actions {
     setPan: (x: number, y: number) => void;
     tidy: () => void;
     openPicker: () => void;
-    paste: (targetFileId: string, targetPath: string, src: ClipItem, move: boolean) => Promise<void>;
-    deleteNode: (fileId: string, path: string, name: string) => Promise<void>;
+    /** Copies or moves one node, or several in order, into `targetPath`. */
+    paste: (targetFileId: string, targetPath: string, src: ClipItem | ClipItem[], move: boolean) => Promise<void>;
+    /**
+     * Asks, then deletes a node. `strings`: also delete String's names for it, opening each String file changed (this
+     * file's window stays in front); `body` replaces the dialog's text. Resolves true once deleted.
+     */
+    deleteNode: (fileId: string, path: string, name: string, opts?: { strings?: boolean; body?: string }) => Promise<boolean>;
     /** Renames a property and/or sets its value, then selects it at its (possibly new) path. False if it failed. */
     editNode: (fileId: string, path: string, edit: NodeEdit) => Promise<boolean>;
     /** Adds a property under `parent` and reveals it. Resolves false when the server refused it. */
@@ -290,35 +295,63 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }, [api, confirm]);
 
     const paste = useCallback<Actions["paste"]>(async (targetFileId, targetPath, src, move) => {
-        try {
-            const r = await api.paste(targetFileId, { sourceId: src.fileId, sourcePath: src.path, targetPath, move });
-            upsert(r.file, r.sourceFile);
-            emit(targetFileId, { reload: [targetPath], reveal: r.path });
-            if (move) {
-                emit(src.fileId, { reload: [parentPath(src.path)] });
-                setClipboard((c) => (c && c.fileId === src.fileId && c.path === src.path ? null : c));
+        const list = Array.isArray(src) ? src : [src];
+        let done = 0, targetName = "", lastPath: string | undefined;
+        // One at a time: each paste changes the files the next one reads.
+        for (const item of list) {
+            try {
+                const r = await api.paste(targetFileId, { sourceId: item.fileId, sourcePath: item.path, targetPath, move });
+                upsert(r.file, r.sourceFile);
+                targetName = r.file.name;
+                lastPath = r.path;
+                done++;
+                if (move) {
+                    emit(item.fileId, { reload: [parentPath(item.path)] });
+                    setClipboard((c) => (c && c.fileId === item.fileId && c.path === item.path ? null : c));
+                }
+            } catch (e) {
+                // With several nodes, say which one failed.
+                if (list.length > 1) toast("error", `“${item.name}”: ${errText(e)}`);
+                else toast("error", errText(e));
             }
-            toast("success", `${move ? "Moved" : "Copied"} “${src.name}” into ${r.file.name}${targetPath ? "/" + targetPath : ""}`);
-        } catch (e) {
-            toast("error", errText(e));
         }
+        if (!done) return;
+        emit(targetFileId, { reload: [targetPath], reveal: lastPath });
+        let what: string;
+        if (list.length === 1) what = `“${list[0].name}”`;
+        else if (done === list.length) what = `${done} nodes`;
+        else what = `${done} of ${list.length} nodes`;
+        toast("success", `${move ? "Moved" : "Copied"} ${what} into ${targetName}${targetPath ? "/" + targetPath : ""}`);
     }, [api, upsert, emit, toast]);
 
-    const deleteNode = useCallback<Actions["deleteNode"]>(async (fileId, path, name) => {
+    const deleteNode = useCallback<Actions["deleteNode"]>(async (fileId, path, name, opts) => {
         const ok = await confirm({
             title: `Delete “${name}”?`,
-            body: "It is removed from the open file in memory only. Nothing on disk changes until you save, and you can discard all edits with Revert.",
+            body: opts?.body ?? "It is removed from the open file in memory only. Nothing on disk changes until you save, and you can discard all edits with Revert.",
             confirmLabel: "Delete",
             danger: true,
         });
-        if (!ok) return;
+        if (!ok) return false;
         try {
-            upsert(await api.deleteNode(fileId, path));
+            const r = await api.deleteNode(fileId, path, opts?.strings);
+            upsert(r.file);
             emit(fileId, { reload: [parentPath(path)] });
+            for (const s of r.strings) {
+                // Each String file opens in its own window, where the change waits to be saved.
+                openFile(s.file);
+                emit(s.file.id, { reload: [...new Set(s.paths.map(parentPath))] });
+            }
+            if (r.strings.length > 0) {
+                requestAnimationFrame(() => dispatch({ type: "focus", id: fileId }));
+                const count = r.strings.reduce((n, s) => n + s.paths.length, 0);
+                toast("success", `Deleted “${name}” and ${count === 1 ? "its entry" : `${count} entries`} in ${r.strings.map((s) => s.file.name).join(", ")}. Save each file to keep it.`);
+            }
+            return true;
         } catch (e) {
             toast("error", errText(e));
+            return false;
         }
-    }, [api, confirm, upsert, emit, toast]);
+    }, [api, confirm, upsert, emit, openFile, toast]);
 
     const editNode = useCallback<Actions["editNode"]>(async (fileId, path, edit) => {
         try {
