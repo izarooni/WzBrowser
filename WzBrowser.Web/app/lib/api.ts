@@ -31,8 +31,9 @@ export interface OpenedFile {
     dirty: boolean;
     savedTo: string | null;
     /** "quest" for a quest archive (QuestInfo.img + Check.img at the root, or a modular QuestData with one {id}.img per quest);
-     * "etc" when Commodity.img is at the root; "canvas" for a modular install's picture file (Data/Mob/_Canvas/_Canvas_000.wz). */
-    kind: "quest" | "etc" | "canvas" | "generic";
+     * "etc" when Commodity.img is at the root; "canvas" for a modular install's picture file (Data/Mob/_Canvas/_Canvas_000.wz);
+     * "character" for Character.wz or one of its modular parts. */
+    kind: "quest" | "etc" | "canvas" | "character" | "generic";
     /** Changes whenever the file's contents change, so views know to refetch. */
     revision: number;
 }
@@ -50,6 +51,22 @@ export interface GalleryItem {
     title: string | null;
     picture: string;
     frames: { picture: string; delay: number }[] | null;
+}
+
+/** One entry of a Character file's menu: a root directory ("Weapon"), or "" for the .imgs at the root. */
+export interface CharacterSection { path: string; label: string; count: number }
+
+/**
+ * One .img of a Character file. `picture`: the canvas to show (its icon, else its first picture); `name`/`desc`: String's;
+ * `stringPath`: where String keeps them, or null when it has no entry for the item.
+ */
+export interface CharacterItem {
+    path: string;
+    id: number | null;
+    picture: string | null;
+    name: string | null;
+    desc: string | null;
+    stringPath: string | null;
 }
 
 /** A property and everything below it, in file order. */
@@ -306,6 +323,18 @@ export function createApi(base: string) {
          * series of pictures as animations. `truncated`: there were too many, and the rest were left out.
          */
         gallery: (id: string) => request<{ items: GalleryItem[]; truncated: boolean }>(`/api/files/${id}/gallery`),
+        /** A Character file's menu: each directory at its root, and the root itself when it holds .imgs. */
+        characterSections: (id: string) => request<CharacterSection[]>(`/api/files/${id}/character`),
+        /** One section's .imgs with String's names; `stringFileId` is the String file those came from. */
+        characterItems: (id: string, section: string) =>
+            request<{ items: CharacterItem[]; stringFileId: string | null }>(`/api/files/${id}/character/items?section=${q(section)}`),
+        /** Sets an item's name and description in String's Eqp.img (adding its entry when missing); String is then listed as open. */
+        setCharacterStrings: (id: string, body: { id: number; section: string; name: string; desc: string }) =>
+            request<{ file: OpenedFile; path: string; name: string | null; desc: string | null }>(`/api/files/${id}/character/strings`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            }),
         quest: (id: string, questId: number) => request<QuestDetail>(`/api/files/${id}/quests/${questId}`),
         questChain: (id: string, questId: number) => request<QuestChain>(`/api/files/${id}/quests/${questId}/chain`),
         commodity: (id: string) => request<CommodityTable>(`/api/files/${id}/commodity`),

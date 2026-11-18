@@ -227,6 +227,10 @@ api.MapGet("/files/{id}/preview", (string id, string kind, int refId, HttpContex
 });
 // A _Canvas file as thumbnails: each thing's first stand, move or fly frame, else its icon; other numbered series animate.
 api.MapGet("/files/{id}/gallery", (string id, WzService wz) => wz.Gallery(id));
+// Character.wz as thumbnails, a section (Weapon, Cap, ...) at a time, with String's names, which can be edited in String.
+api.MapGet("/files/{id}/character", (string id, WzService wz) => wz.CharacterSections(id));
+api.MapGet("/files/{id}/character/items", (string id, string? section, WzService wz) => wz.CharacterSectionItems(id, section));
+api.MapPut("/files/{id}/character/strings", (string id, CharacterStringRequest req, WzService wz) => wz.SetCharacterStrings(id, req));
 api.MapGet("/files/{id}/png", (string id, string path, WzService wz) =>
     Results.File(wz.Png(id, path), "image/png"));
 // Every canvas under a node (a folder, .img or property), as PNGs in a zip laid out like the tree.

@@ -3,6 +3,7 @@ import { useConnection } from "../lib/connection";
 import { MIN_H, MIN_W, useActions, useWorkspaceData, type Win } from "../lib/workspace";
 import { Archive, Download, Minus, Plus, Undo, XMark } from "./icons";
 import { CanvasGallery } from "./canvas-gallery";
+import { CharacterBrowser } from "./character-browser";
 import { CommodityEditor } from "./commodity-editor";
 import { NodeTree } from "./node-tree";
 import { QuestBrowser } from "./quest-browser";
@@ -19,10 +20,10 @@ export const WzWindow = memo(function WzWindow({ win, focused }: { win: Win; foc
     const { browseOnly } = useConnection();
     const file = files[win.fileId];
     const gesture = useRef<Gesture | null>(null);
-    // Quest archives open on the quest browser, Etc.wz on the Commodity table and _Canvas files on their thumbnails; the
-    // raw tree is one tab away.
+    // Quest archives open on the quest browser, Etc.wz on the Commodity table, and _Canvas and Character files on their
+    // thumbnails; the raw tree is one tab away.
     const [tab, setTab] = useState<"main" | "raw">("main");
-    const mainLabel = file?.kind === "quest" ? "Quests" : file?.kind === "etc" ? "Commodity" : file?.kind === "canvas" ? "Thumbnails" : null;
+    const mainLabel = file?.kind === "quest" ? "Quests" : file?.kind === "etc" ? "Commodity" : file?.kind === "canvas" || file?.kind === "character" ? "Thumbnails" : null;
     // Browse-only viewers get the main view alone: no tabs, no raw tree, no "show in raw tree" buttons.
     const openRaw = browseOnly ? undefined : (path: string) => { setTab("raw"); actions.reveal(win.fileId, path); };
 
@@ -147,7 +148,9 @@ export const WzWindow = memo(function WzWindow({ win, focused }: { win: Win; foc
                         ? <QuestBrowser fileId={win.fileId} revision={file.revision} onOpenRaw={openRaw} />
                         : file?.kind === "canvas"
                             ? <CanvasGallery fileId={win.fileId} revision={file.revision} onOpenRaw={openRaw} />
-                            : <CommodityEditor fileId={win.fileId} revision={file!.revision} onOpenRaw={openRaw} />}
+                            : file?.kind === "character"
+                                ? <CharacterBrowser fileId={win.fileId} revision={file.revision} onOpenRaw={openRaw} />
+                                : <CommodityEditor fileId={win.fileId} revision={file!.revision} onOpenRaw={openRaw} />}
                 </div>
             )}
             {!win.collapsed && !browseOnly && (

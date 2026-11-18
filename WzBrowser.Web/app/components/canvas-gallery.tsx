@@ -4,14 +4,40 @@ import { useConnection } from "../lib/connection";
 import { Photo } from "./icons";
 
 /** Thumbnail sizes, like Explorer's View menu. */
-const SIZES = { small: 32, medium: 64, large: 128, xl: 256 } as const;
-type Size = keyof typeof SIZES;
+export const SIZES = { small: 32, medium: 64, large: 128, xl: 256 } as const;
+export type Size = keyof typeof SIZES;
 const SIZE_LABEL: Record<Size, string> = { small: "Small icons", medium: "Medium icons", large: "Large icons", xl: "Extra large icons" };
 const SIZE_KEY = "wzbrowser.gallerySize";
 
 function loadSize(): Size {
     try { const v = localStorage.getItem(SIZE_KEY); if (v && v in SIZES) return v as Size; } catch { /* not persisted */ }
     return "large";
+}
+
+/** The thumbnail size picked in any gallery, remembered across them. */
+export function useThumbnailSize(): [Size, (s: Size) => void] {
+    const [size, setSize] = useState<Size>(loadSize);
+    const change = (s: Size) => {
+        setSize(s);
+        try { localStorage.setItem(SIZE_KEY, s); } catch { /* not persisted */ }
+    };
+    return [size, change];
+}
+
+/** The "View" picker for {@link useThumbnailSize}. */
+export function SizePicker({ size, onChange }: { size: Size; onChange: (s: Size) => void }) {
+    return (
+        <label className="flex items-center gap-2 text-xs text-zinc-500">
+            View
+            <select
+                value={size}
+                onChange={(e) => onChange(e.target.value as Size)}
+                className="rounded-lg border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-800 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+            >
+                {(Object.keys(SIZES) as Size[]).map((s) => <option key={s} value={s}>{SIZE_LABEL[s]}</option>)}
+            </select>
+        </label>
+    );
 }
 
 /**
@@ -27,7 +53,7 @@ export const CanvasGallery = memo(function CanvasGallery({ fileId, revision, onO
     const { api, status } = useConnection();
     const [listing, setListing] = useState<{ items: GalleryItem[]; truncated: boolean } | null>(null);
     const [error, setError] = useState<string | null>(null);
-    const [size, setSize] = useState<Size>(loadSize);
+    const [size, changeSize] = useThumbnailSize();
     const [selected, setSelected] = useState<string | null>(null);
 
     useEffect(() => {
@@ -39,11 +65,6 @@ export const CanvasGallery = memo(function CanvasGallery({ fileId, revision, onO
         );
         return () => { cancelled = true; };
     }, [api, status, fileId, revision]);
-
-    const changeSize = (s: Size) => {
-        setSize(s);
-        try { localStorage.setItem(SIZE_KEY, s); } catch { /* not persisted */ }
-    };
 
     const items = listing?.items;
     const box = SIZES[size];
@@ -58,16 +79,7 @@ export const CanvasGallery = memo(function CanvasGallery({ fileId, revision, onO
                         ? `${items.length.toLocaleString()} item${items.length === 1 ? "" : "s"}${listing!.truncated ? " (the rest are left out)" : ""}`
                         : error ? "" : "Loading…"}
                 </span>
-                <label className="flex items-center gap-2 text-xs text-zinc-500">
-                    View
-                    <select
-                        value={size}
-                        onChange={(e) => changeSize(e.target.value as Size)}
-                        className="rounded-lg border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-800 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
-                    >
-                        {(Object.keys(SIZES) as Size[]).map((s) => <option key={s} value={s}>{SIZE_LABEL[s]}</option>)}
-                    </select>
-                </label>
+                <SizePicker size={size} onChange={changeSize} />
             </div>
 
             <div className="min-h-0 flex-1 overflow-auto p-3" onClick={(e) => { if (e.target === e.currentTarget) setSelected(null); }}>
@@ -93,8 +105,9 @@ export const CanvasGallery = memo(function CanvasGallery({ fileId, revision, onO
     );
 });
 
-function Thumbnail({ item, box, url, selected, onSelect, onOpen }: {
-    item: GalleryItem;
+/** One picture with its label under it; `item.picture` null shows a placeholder. Double-click or Enter opens it. */
+export function Thumbnail({ item, box, url, selected, onSelect, onOpen }: {
+    item: Omit<GalleryItem, "picture"> & { picture: string | null };
     box: number;
     url: (path: string) => string;
     selected: boolean;
@@ -108,6 +121,8 @@ function Thumbnail({ item, box, url, selected, onSelect, onOpen }: {
     // Pictures smaller than the box are scaled up with hard pixel edges, like the game draws them; bigger ones shrink to fit.
     const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
     const [failed, setFailed] = useState(false);
+    // A new picture (another item in the same tile) gets another chance to load.
+    useEffect(() => setFailed(false), [picture]);
     const upscaled = natural != null && natural.w < box && natural.h < box;
 
     return (
@@ -127,7 +142,7 @@ function Thumbnail({ item, box, url, selected, onSelect, onOpen }: {
             }`}
         >
             <span className="grid shrink-0 place-items-center" style={{ width: box, height: box }}>
-                {!failed ? (
+                {!failed && picture != null ? (
                     <img
                         src={url(picture)}
                         alt=""
