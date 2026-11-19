@@ -114,5 +114,6 @@ Re-run the command only if the address changes. For example, if port 5178 is bus
 | `wz_batch` | Many `set` / `rename` / `create` / `delete` / `copy` / `move` steps across files in one call. **All or nothing**: if one step fails, the rest are undone. `dryRun` checks without changing anything. |
 | `wz_save`, `wz_revert` | Save to a new file, or discard edits |
 | `wz_quests`, `wz_quest`, `wz_commodity`, `wz_set_commodity` | The quest and Cash Shop views |
+| `wz_xml_export`, `wz_xml_export_status` | Convert `.wz` files to server XML (`{Name}.wz/.../{image}.img.xml`). Runs in the background; poll the status tool with the job id, or cancel it. Canvases keep their size but not their pixels, and open files are exported with their unsaved edits. |
 
 The MCP server only answers programs on the same computer.
