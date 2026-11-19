@@ -164,6 +164,32 @@ public sealed class WzMcpTools(WzService wz)
     public CommodityRowsResult SetCommodity([Description("File id.")] string file, List<CommoditySetRequest> sets) =>
         Write(() => wz.SetCommodity(file, sets));
 
+    // ---------------------------------------------------------------- converting
+
+    [McpServerTool(Name = "wz_xml_export")]
+    [Description(
+        "Converts .wz files to the classic server XML layout (OdinMS and descendants): every image becomes {output}/{Name}.wz/{dirs}/{image}.img.xml. " +
+        "Canvases keep their size and children but not their pixels; sounds become empty markers. The parts of a modular file (Mob_000.wz, Mob_001.wz, ...) " +
+        "share one Mob.wz folder and its index stub is skipped. A file that's already open is converted with its unsaved edits. Existing XML files are overwritten. " +
+        "Runs in the background: returns a job id to poll with wz_xml_export_status.")]
+    public XmlExportJobDto XmlExport(
+        [Description("Full paths of the .wz files to convert (must be in the library folder).")] List<string> paths,
+        [Description("Folder to write into; it gets one {Name}.wz folder per file.")] string output,
+        [Description("auto (default), GMS, EMS, BMS, CLASSIC or GETFROMZLZ.")] string? encryption = null) =>
+        Run(() => wz.StartXmlExport(new XmlExportRequest(paths, output, encryption)));
+
+    [McpServerTool(Name = "wz_xml_export_status")]
+    [Description("Progress of a wz_xml_export job: its state (running, done, failed, cancelled) and per file the images written of the total. " +
+                 "With cancel, stops it after the image being written; files already written stay.")]
+    public XmlExportJobDto XmlExportStatus(
+        [Description("Job id from wz_xml_export.")] string id,
+        [Description("Cancel the job.")] bool cancel = false) =>
+        Run(() =>
+        {
+            if (cancel) return wz.CancelXmlExport(id);
+            return wz.XmlExportStatus(id);
+        });
+
     /// <summary>Runs an editing tool, unless the server was started with --read-only.</summary>
     private T Write<T>(Func<T> action) =>
         wz.ReadOnly ? throw new McpException("This server is read only: files can be viewed but not changed.") : Run(action);
