@@ -100,16 +100,7 @@ public sealed partial class WzService
                 return ("Map.img", ImageIds());
             case "item":
             {
-                var image = segs[0].ToLowerInvariant() switch
-                {
-                    "consume" => "Consume.img",
-                    "install" => "Ins.img",
-                    "etc" => "Etc.img",
-                    "cash" => "Cash.img",
-                    "pet" => "Pet.img",
-                    _ => null,
-                };
-                if (image == null) return null;
+                if (ItemStringImage(segs[0]) is not { } image) return null;
                 if (image == "Pet.img") return (image, ImageIds());
                 return node switch
                 {

@@ -5,6 +5,7 @@ import { useNames } from "../lib/use-names";
 import { EDITABLE, INTEGER, invalid } from "../lib/values";
 import { useActions } from "../lib/workspace";
 import { CategorySidebar, snTab, tabKey, type TabFilter } from "./category-sidebar";
+import { PaneResizer, usePaneWidth } from "./pane-resizer";
 import { Plus, Search, XMark } from "./icons";
 import { RefCtx, RefLink, type RefContext } from "./ref-link";
 
@@ -57,6 +58,7 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
     const actions = useActions();
     const [table, setTable] = useState<CommodityTable | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const tabsPane = usePaneWidth("cash-tabs", 224, 160, 520);
     const [filter, setFilter] = useState("");
     const [sort, setSort] = useState<{ col: number; desc: boolean } | null>(null);
     const [editing, setEditing] = useState<{ row: string; col: number } | null>(null);
@@ -484,9 +486,10 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
     return (
         <RefCtx.Provider value={ref}>
             <div className="flex min-h-0 flex-1">
-            <CategorySidebar fileId={fileId} revision={revision} counts={counts} total={table?.rows.length ?? null} other={otherCount} unfiled={unfiledCount}
+            <CategorySidebar width={tabsPane.width} fileId={fileId} revision={revision} counts={counts} total={table?.rows.length ?? null} other={otherCount} unfiled={unfiledCount}
                 selected={tabFilter} onTabs={setTabs} onOpenRaw={onOpenRaw}
                 onSelect={(f) => { setTabFilter(f); if (scrollRef.current) scrollRef.current.scrollTop = 0; }} />
+            <PaneResizer pane={tabsPane} side="left" label="Resize the Cash Shop tabs" />
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 <div className="flex flex-wrap items-center gap-3 border-b border-zinc-100 p-3 dark:border-zinc-800">
                     <label className="relative block min-w-48 flex-1">

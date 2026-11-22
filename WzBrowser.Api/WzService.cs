@@ -18,9 +18,11 @@ public record NodeDto(
 /// <param name="Kind">"quest" for a quest archive (QuestInfo.img + Check.img at the root, or the modular QuestData with
 /// one {id}.img per quest), "etc" for one with
 /// Commodity.img at the root (Etc.wz), "canvas" for a modular install's picture file
-/// (Data/Mob/_Canvas/_Canvas_000.wz), "character" for Character.wz or one of its modular parts, otherwise "generic".</param>
+/// (Data/Mob/_Canvas/_Canvas_000.wz), "character" for Character.wz or one of its modular parts, "item" for Item.wz or one of
+/// its, otherwise "generic".</param>
 /// <param name="Revision">Changes whenever the file's contents change (paste, delete, revert) so views know to refetch.</param>
-public record OpenedFileDto(string Id, string Name, string Path, string Encryption, int Version, int ChildCount, bool Dirty, string? SavedTo, string Kind, long Revision);
+/// <param name="Top">The classic file this one is or is part of ("Mob" for Mob.wz, Mob2.wz, Data/Mob/Mob_000.wz or Packs/Mob_000.ms).</param>
+public record OpenedFileDto(string Id, string Name, string Path, string Encryption, int Version, int ChildCount, bool Dirty, string? SavedTo, string Kind, long Revision, string Top);
 
 public record SoundData(byte[] Bytes, string ContentType);
 
@@ -52,6 +54,44 @@ public sealed partial class WzService(string? root = null)
     public string? Root { get; } = root == null ? null : System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(root));
     /// <summary>Started with --read-only: files may be opened and viewed, but nothing edited, saved or closed.</summary>
     public bool ReadOnly { get; init; }
+    /// <summary>How many folders deep under <see cref="Root"/> library files are looked for; null for all of them.</summary>
+    public int? SearchDepth { get; init; }
+
+    private EnumerationOptions LibrarySearch => new() { RecurseSubdirectories = true, MaxRecursionDepth = SearchDepth ?? int.MaxValue };
+
+    /// <summary>Each install's tables when the server isn't pinned to a folder, by install folder.</summary>
+    private readonly ConcurrentDictionary<string, WzService> _installs = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The service whose library the tables (skills, mobs, maps, ...) read: this one when it's pinned to a folder,
+    /// otherwise one pinned to the install the open file <paramref name="fileId"/> is in, made once per install.
+    /// That one is read only and looks for files at most two folders below the install folder.
+    /// </summary>
+    public WzService Tables(string? fileId)
+    {
+        if (Root != null) return this;
+        if (fileId == null) throw new InvalidDataException("This server isn't pinned to a folder, so the tables need an open file to read its install.");
+        var folder = InstallFolder(Get(fileId).Path);
+        return _installs.GetOrAdd(folder, f => new WzService(f) { ReadOnly = true, SearchDepth = 2 });
+    }
+
+    /// <summary>
+    /// The install a file is in: the modular Data folder (holding String/String.ini) or the classic folder (holding
+    /// String.wz), looked for in the file's folder and at most two folders up, never searched for. Else the file's folder.
+    /// </summary>
+    private static string InstallFolder(string filePath)
+    {
+        var start = System.IO.Path.GetDirectoryName(filePath)!;
+        IEnumerable<string> Upward()
+        {
+            var dir = start;
+            for (var up = 0; up <= 2 && dir != null; up++, dir = System.IO.Path.GetDirectoryName(dir)) yield return dir;
+        }
+        // Modular first: Data/String has a String.wz index stub that would otherwise pass for a classic install.
+        return Upward().FirstOrDefault(d => File.Exists(System.IO.Path.Combine(d, "String", "String.ini")))
+            ?? Upward().FirstOrDefault(d => File.Exists(System.IO.Path.Combine(d, "String.wz")))
+            ?? start;
+    }
 
     /// <summary>True when <paramref name="fullPath"/> may be read or written: always, unless the server is pinned to a folder.</summary>
     internal bool InRoot(string fullPath) =>
@@ -61,28 +101,45 @@ public sealed partial class WzService(string? root = null)
     /// Every .wz file under <see cref="Root"/>, by relative path. A modular folder's index stub ({name}.wz beside
     /// {name}_000.wz) is left out, since the data is in the parts.
     /// </summary>
-    /// <param name="browsableOnly">Only the files with a view of their own (quest archives and Etc.wz), each with its kind.</param>
+    /// <param name="browsableOnly">Only the files with a view or table of their own (see <see cref="IsBrowsable"/>), each with its kind.</param>
     public List<LibraryFile> Library(bool browsableOnly = false)
     {
         if (Root == null) throw new InvalidDataException("This server isn't pinned to a folder.");
         if (!Directory.Exists(Root)) throw new DirectoryNotFoundException($"Library folder not found: {Root}");
-        var files = WzFilesIn(Root);
+        var files = WzFilesIn(Root, LibrarySearch);
         if (browsableOnly)
-            files = files.Select(f => f with { Kind = ProbeKind(f.Path) }).Where(f => IsBrowsable(f.Kind!));
+            files = files.Select(f => f with { Kind = ProbeKind(f.Path) }).Where(f => IsBrowsable(f.Path, f.Kind!));
         return files.OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     /// <summary>
     /// Every .wz file and .ms pack under <paramref name="folder"/> except a modular folder's index stub, named relative to it.
     /// </summary>
-    private static IEnumerable<LibraryFile> WzFilesIn(string folder) =>
-        Directory.EnumerateFiles(folder, "*.wz", SearchOption.AllDirectories)
+    private static IEnumerable<LibraryFile> WzFilesIn(string folder, EnumerationOptions? search = null) =>
+        Directory.EnumerateFiles(folder, "*.wz", search ??= new EnumerationOptions { RecurseSubdirectories = true })
             .Where(f => !File.Exists(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(f)!, System.IO.Path.GetFileNameWithoutExtension(f) + "_000.wz")))
-            .Concat(Directory.EnumerateFiles(folder, "*.ms", SearchOption.AllDirectories))
+            .Concat(Directory.EnumerateFiles(folder, "*.ms", search))
             .Select(f => new LibraryFile(System.IO.Path.GetRelativePath(folder, f).Replace('\\', '/'), f, new FileInfo(f).Length));
 
     /// <summary>Quest archives and Etc.wz have a view of their own; other files only have the raw tree.</summary>
-    public static bool IsBrowsable(string kind) => kind is "quest" or "etc";
+    private static bool HasOwnView(string kind) => kind is "quest" or "etc";
+
+    /// <summary>
+    /// The classic files whose data the web app shows as a table of the library's data in their window (mobs, mob
+    /// locations, maps, items, NPCs). Keep in step with the web app's DATA_VIEWS.
+    /// </summary>
+    private static readonly HashSet<string> TableTops = new(["Mob", "Etc", "Map", "Item", "Npc"], StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The classic file a file is or is part of, without a numbered split's digits (Mob2.wz is "Mob").</summary>
+    private static string TopOf(string path) => WzLayout.Classic(path, "").Top.TrimEnd('0', '1', '2', '3', '4', '5', '6', '7', '8', '9');
+
+    /// <summary>
+    /// A file with something to show without the raw tree: a view of its own (quests, Commodity, or the Character, Item
+    /// and Skill thumbnails), or a library table (not for the picture-only _Canvas parts, which sit under Mob).
+    /// </summary>
+    public static bool IsBrowsable(string path, string kind) =>
+        HasOwnView(kind) || kind is "character" or "item" or "skill"
+        || kind != "canvas" && !IsCanvasFile(path) && TableTops.Contains(TopOf(path));
 
     /// <summary>Each file's kind, keyed by path and remembered until the file on disk changes.</summary>
     private readonly ConcurrentDictionary<string, (DateTime Written, long Size, string Kind)> _kinds = new(StringComparer.OrdinalIgnoreCase);
@@ -103,7 +160,7 @@ public sealed partial class WzService(string? root = null)
             {
                 var dto = Open(path, null, hidden: true);
                 kind = dto.Kind;
-                if (!IsBrowsable(kind)) Close(dto.Id);
+                if (!HasOwnView(kind)) Close(dto.Id);
             }
             catch (Exception) { kind = "generic"; }
         }
@@ -156,14 +213,14 @@ public sealed partial class WzService(string? root = null)
 
     /// <param name="hidden">Open without listing it (used for sibling files read on behalf of a quest archive).
     /// Opening a hidden file normally makes it visible.</param>
-    /// <param name="browsableOnly">Refuse files without a view of their own (anything but quest archives and Etc.wz).</param>
+    /// <param name="browsableOnly">Refuse files without a view or table of their own (see <see cref="IsBrowsable"/>).</param>
     public OpenedFileDto Open(string path, string? encryption, bool hidden = false, bool browsableOnly = false)
     {
         path = System.IO.Path.GetFullPath(path);
         if (!InRoot(path)) throw new UnauthorizedAccessException("Only files in this server's library folder can be opened.");
         if (!File.Exists(path)) throw new FileNotFoundException("WZ file not found.", path);
-        if (browsableOnly && !IsBrowsable(ProbeKind(path)))
-            throw new UnauthorizedAccessException("Only quest archives and Etc.wz can be viewed from here.");
+        if (browsableOnly && !IsBrowsable(path, ProbeKind(path)))
+            throw new UnauthorizedAccessException("Only files with a view or table of their own can be viewed from here.");
 
         var id = FileId(path);
         if (_files.TryGetValue(id, out var existing))
@@ -182,7 +239,9 @@ public sealed partial class WzService(string? root = null)
             Kind = modularQuests || root.GetImageByName("QuestInfo.img") != null && root.GetImageByName("Check.img") != null ? "quest"
                 : root.GetImageByName(CommodityImg) != null ? "etc"
                 : IsCanvasFile(path) ? "canvas"
-                : IsCharacterFile(path) ? "character" : "generic",
+                : IsCharacterFile(path) ? "character"
+                : IsItemFile(path) ? "item"
+                : IsSkillFile(path) ? "skill" : "generic",
             ModularQuests = modularQuests,
             Hidden = hidden,
             MsLayout = msLayout,
@@ -275,9 +334,9 @@ public sealed partial class WzService(string? root = null)
         return names.Count == 0 || names.Count(n => SaneName.IsMatch(n)) >= names.Count * 0.9;
     }
 
-    /// <param name="browsableOnly">Only quest archives and Etc.wz.</param>
+    /// <param name="browsableOnly">Only the files with a view or table of their own (see <see cref="IsBrowsable"/>).</param>
     public IEnumerable<OpenedFileDto> List(bool browsableOnly = false) => _files
-        .Where(kv => !kv.Value.Hidden && (!browsableOnly || IsBrowsable(kv.Value.Kind)))
+        .Where(kv => !kv.Value.Hidden && (!browsableOnly || IsBrowsable(kv.Value.Path, kv.Value.Kind)))
         .Select(kv => Describe(kv.Key, kv.Value));
 
     public bool Close(string id)
@@ -441,7 +500,7 @@ public sealed partial class WzService(string? root = null)
     {
         int count;
         lock (e.Lock) count = e.File.WzDirectory.WzDirectories.Count + e.File.WzDirectory.WzImages.Count;
-        return new OpenedFileDto(id, System.IO.Path.GetFileName(e.Path), e.Path, e.Encryption, e.File.Version, count, e.Dirty, e.SavedTo, e.Kind, e.Revision);
+        return new OpenedFileDto(id, System.IO.Path.GetFileName(e.Path), e.Path, e.Encryption, e.File.Version, count, e.Dirty, e.SavedTo, e.Kind, e.Revision, TopOf(e.Path));
     }
 
     // ------------------------------------------------------------ editing (in memory only)

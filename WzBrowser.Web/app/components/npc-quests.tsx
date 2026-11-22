@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { NpcQuest, NpcQuests } from "../lib/api";
 import { useConnection } from "../lib/connection";
+import { useLibraryApi } from "../lib/library-api";
 import { useScrollIntoView, type Focus } from "../lib/focus";
 import { npcId } from "../lib/game-ids";
 import { ChevronDown, ChevronRight, Search, XMark } from "./icons";
@@ -13,14 +14,17 @@ const PREVIEW_QUESTS = 6;
 
 /** Every NPC a quest starts or ends at: its sprite, the quests, each a link to that quest's page, and the maps it stands in. */
 export const NpcQuestTable = memo(function NpcQuestTable({ onOpenQuest, focus, onShowMap }: {
-    /** Shows the quest in its archive's tab. */
-    onOpenQuest: (archive: string, quest: number) => void;
+    /** Shows the quest in its archive's tab; without it the quests aren't links. */
+    onOpenQuest?: (archive: string, quest: number) => void;
     /** The NPC another tab asked to show: it's opened and scrolled to. */
     focus: Focus | null;
     /** Shows the map in the Maps tab; without it the maps aren't links. */
     onShowMap?: (id: number) => void;
 }) {
-    const { api, status, maps: hasMaps } = useConnection();
+    const { status, library, maps } = useConnection();
+    const api = useLibraryApi();
+    // Without a pinned library there's no telling up front whether the install has maps, so they're asked for.
+    const hasMaps = maps || !library;
     const [data, setData] = useState<NpcQuests[] | null>(null);
     // NPC id -> the maps it stands in, from the Map files; null until loaded (or when the library has none).
     const [npcMaps, setNpcMaps] = useState<{ maps: Map<number, number[]>; names: Map<number, string> } | null>(null);
@@ -192,9 +196,10 @@ export const NpcQuestTable = memo(function NpcQuestTable({ onOpenQuest, focus, o
                                                 <li key={`${q.archive}/${q.id}`}>
                                                     <button
                                                         type="button"
-                                                        onClick={() => onOpenQuest(q.archive, q.id)}
-                                                        title="Show this quest"
-                                                        className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left text-[13px] transition hover:border-accent-400 hover:bg-accent-50/50 dark:hover:border-accent-500/60 dark:hover:bg-accent-600/10 ${hits?.has(q)
+                                                        onClick={() => onOpenQuest?.(q.archive, q.id)}
+                                                        disabled={!onOpenQuest}
+                                                        title={onOpenQuest ? "Show this quest" : undefined}
+                                                        className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left text-[13px] transition disabled:pointer-events-none hover:border-accent-400 hover:bg-accent-50/50 dark:hover:border-accent-500/60 dark:hover:bg-accent-600/10 ${hits?.has(q)
                                                             ? "border-accent-400 dark:border-accent-500/60"
                                                             : "border-zinc-200 dark:border-zinc-800"}`}
                                                     >

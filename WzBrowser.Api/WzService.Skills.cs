@@ -114,7 +114,7 @@ public sealed partial class WzService
 
     /// <summary>Files named {top}.wz, {top}_000.wz, ... under the library, without a modular folder's index stub.</summary>
     private IEnumerable<string> LibraryParts(string top, string extension) =>
-        Directory.EnumerateFiles(Root!, top + "*" + extension, SearchOption.AllDirectories)
+        Directory.EnumerateFiles(Root!, top + "*" + extension, LibrarySearch)
             .Where(f => System.IO.Path.GetFileNameWithoutExtension(f) is var n
                         && (n == top ? !File.Exists(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(f)!, top + "_000" + extension))
                             : n.StartsWith(top + "_") && n[(top.Length + 1)..] is { Length: > 0 } digits && digits.All(char.IsAsciiDigit)))

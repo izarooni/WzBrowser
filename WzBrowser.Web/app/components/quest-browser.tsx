@@ -3,6 +3,7 @@ import type { QuestSummary } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { useActions } from "../lib/workspace";
 import { Search, XMark } from "./icons";
+import { PaneResizer, paneVar, usePaneWidth } from "./pane-resizer";
 import { QuestDetailView, QuestSelectionView } from "./quest-detail";
 
 const ROW_H = 40;
@@ -23,6 +24,7 @@ export const QuestBrowser = memo(function QuestBrowser({ fileId, revision, onOpe
     const [error, setError] = useState<string | null>(null);
     const [filter, setFilter] = useState("");
     const [selected, setSelected] = useState<number | null>(null);
+    const listPane = usePaneWidth("quests", 320, 200, 720);
     // Links inside the detail pane are created once per quest, so they read the current selection through a ref.
     const selectedRef = useRef<number | null>(null);
     selectedRef.current = selected;
@@ -160,7 +162,7 @@ export const QuestBrowser = memo(function QuestBrowser({ fileId, revision, onOpe
     return (
         <div className="@container flex min-h-0 flex-1 flex-col">
             <div className="flex min-h-0 flex-1 flex-col @xl:flex-row">
-                <div className="flex max-h-[45%] min-h-0 shrink-0 flex-col border-b border-zinc-100 @xl:max-h-none @xl:w-80 @xl:border-b-0 @xl:border-r dark:border-zinc-800">
+                <div style={paneVar(listPane)} className="flex max-h-[45%] min-h-0 shrink-0 flex-col border-b border-zinc-100 @xl:max-h-none @xl:w-(--pane-w) @xl:border-b-0 @xl:border-r dark:border-zinc-800">
                     <div className="border-b border-zinc-100 p-3 dark:border-zinc-800">
                         <label className="relative block">
                             <Search className="search-icon" />
@@ -256,7 +258,7 @@ export const QuestBrowser = memo(function QuestBrowser({ fileId, revision, onOpe
                                                 className="size-4 shrink-0 cursor-pointer accent-accent-600"
                                             />
                                         )}
-                                        <span className="min-w-0 truncate">
+                                        <span className="min-w-0 truncate" title={q.name ? `${q.id} - ${q.name}` : undefined}>
                                             {!readOnly && <><span className="font-mono text-xs tabular-nums text-zinc-500">{q.id}</span>{" - "}</>}
                                             {q.name || <span className="italic text-zinc-400">(unnamed)</span>}
                                         </span>
@@ -267,6 +269,7 @@ export const QuestBrowser = memo(function QuestBrowser({ fileId, revision, onOpe
                     </div>
                 </div>
 
+                <PaneResizer pane={listPane} side="left" label="Resize the quest list" className="hidden @xl:block" />
                 <div className="min-h-0 min-w-0 flex-1 overflow-auto">
                     {history.length > 0 && !selectionShown && (
                         <div className="sticky top-0 z-10 border-b border-zinc-100 bg-white/90 px-6 py-2.5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/90">

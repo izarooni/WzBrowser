@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { MobLocation, MobLocations } from "../lib/api";
 import { useConnection } from "../lib/connection";
+import { useLibraryApi } from "../lib/library-api";
 import { useScrollIntoView, type Focus } from "../lib/focus";
 import { mapId, mobId, splitMapName } from "../lib/game-ids";
 import { ChevronDown, ChevronRight, Search, XMark } from "./icons";
@@ -17,7 +18,8 @@ export const MobLocationTable = memo(function MobLocationTable({ focus, onShowMa
     /** Shows the map in the Maps tab; without it the maps aren't links. */
     onShowMap?: (id: number) => void;
 }) {
-    const { api, status } = useConnection();
+    const { status } = useConnection();
+    const api = useLibraryApi();
     const [data, setData] = useState<MobLocations | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [filter, setFilter] = useState("");
@@ -201,7 +203,7 @@ export const MobLocationTable = memo(function MobLocationTable({ focus, onShowMa
 
 /** A map with its minimap and name; a link to the map's page in the Maps tab when `onShow` is given. */
 export function MapCard({ id, name, highlight, onShow }: { id: number; name: string | undefined; highlight: boolean; onShow?: (id: number) => void }) {
-    const { api } = useConnection();
+    const api = useLibraryApi();
     const [hasMinimap, setHasMinimap] = useState(true);
     const { street, map } = splitMapName(name);
     const body = (

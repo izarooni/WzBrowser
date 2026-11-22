@@ -1,21 +1,14 @@
 import type { MetaFunction } from "@remix-run/react";
 import { useRef, type PointerEvent, type WheelEvent } from "react";
 import { Squares } from "../components/icons";
-import { LibraryWiki } from "../components/library-wiki";
 import { WzWindow } from "../components/wz-window";
 import { useConnection } from "../lib/connection";
 import { useActions, useLayout } from "../lib/workspace";
 
 export const meta: MetaFunction = () => [{ title: "WzBrowser" }];
 
-/** Viewers who may only browse get the library as one page; everyone else gets the window workspace. */
-export default function Index() {
-    const { browseOnly } = useConnection();
-    return browseOnly ? <LibraryWiki /> : <Workspace />;
-}
-
 /** The workspace: a pannable canvas with one floating window per open WZ file. */
-function Workspace() {
+export default function Workspace() {
     const { status, recheck } = useConnection();
     const { wins, pan } = useLayout();
     const actions = useActions();
@@ -68,6 +61,7 @@ function Workspace() {
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
             onWheel={onWheel}
+            data-canvas
             style={{ backgroundPosition: `${pan.x}px ${pan.y}px` }}
             className="canvas-dots absolute inset-0 cursor-grab touch-none overflow-hidden active:cursor-grabbing"
         >

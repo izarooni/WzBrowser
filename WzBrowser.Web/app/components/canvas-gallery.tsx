@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef, useState, type RefObject } from "react";
 import type { GalleryItem } from "../lib/api";
 import { useConnection } from "../lib/connection";
+import { useQueuedImage } from "../lib/image-queue";
 import { Photo } from "./icons";
 
 /** Thumbnail sizes, like Explorer's View menu. */
@@ -128,11 +129,15 @@ export function Thumbnail({ item, box, url, selected, onSelect, onOpen }: {
     const frame = useAnimation(ref, item.frames);
     const picture = item.frames ? item.frames[frame].picture : item.picture;
 
+    // Loaded through the queue, so a screenful of pictures doesn't hold up switching sections.
+    const { src, failed } = useQueuedImage(picture != null ? url(picture) : null, ref);
+    // An animation keeps showing its last frame while the next one loads, instead of flashing empty.
+    const lastSrc = useRef<string | null>(null);
+    if (src) lastSrc.current = src;
+    const shown = src ?? (item.frames ? lastSrc.current : null);
+
     // Pictures smaller than the box are scaled up with hard pixel edges, like the game draws them; bigger ones shrink to fit.
     const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
-    const [failed, setFailed] = useState(false);
-    // A new picture (another item in the same tile) gets another chance to load.
-    useEffect(() => setFailed(false), [picture]);
     const upscaled = natural != null && natural.w < box && natural.h < box;
 
     return (
@@ -151,20 +156,21 @@ export function Thumbnail({ item, box, url, selected, onSelect, onOpen }: {
                     : "border-transparent hover:bg-zinc-100 dark:hover:bg-zinc-800/70"
             }`}
         >
-            <span className="grid shrink-0 place-items-center" style={{ width: box, height: box }}>
-                {!failed && picture != null ? (
+            {/* Fixed tracks: with auto ones the cell grows to the picture, so max-w/max-h-full wouldn't hold it in the box. */}
+            <span className="grid shrink-0 place-items-center overflow-hidden" style={{ width: box, height: box, gridTemplate: `${box}px / ${box}px` }}>
+                {shown ? (
                     <img
-                        src={url(picture)}
+                        src={shown}
                         alt=""
-                        loading="lazy"
                         draggable={false}
                         onLoad={(e) => setNatural({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
-                        onError={() => setFailed(true)}
-                        className="max-h-full max-w-full object-contain"
+                        className="min-h-0 min-w-0 max-h-full max-w-full object-contain"
                         style={upscaled ? { width: "100%", height: "100%", imageRendering: "pixelated" } : undefined}
                     />
-                ) : (
+                ) : failed ? (
                     <Photo className="size-1/2 max-h-8 max-w-8 text-zinc-300 dark:text-zinc-600" />
+                ) : (
+                    <span className="skeleton size-1/2 max-h-8 max-w-8 rounded bg-zinc-100 dark:bg-zinc-800" />
                 )}
             </span>
             <span className={`line-clamp-2 w-full break-all text-xs leading-tight ${selected ? "text-accent-800 dark:text-accent-200" : "text-zinc-700 dark:text-zinc-300"}`}>

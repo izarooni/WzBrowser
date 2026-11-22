@@ -32,10 +32,13 @@ export interface OpenedFile {
     savedTo: string | null;
     /** "quest" for a quest archive (QuestInfo.img + Check.img at the root, or a modular QuestData with one {id}.img per quest);
      * "etc" when Commodity.img is at the root; "canvas" for a modular install's picture file (Data/Mob/_Canvas/_Canvas_000.wz);
-     * "character" for Character.wz or one of its modular parts. */
-    kind: "quest" | "etc" | "canvas" | "character" | "generic";
+     * "character" for Character.wz or one of its modular parts; "item" for Item.wz or one of its; "skill" for Skill.wz
+     * or one of its. */
+    kind: "quest" | "etc" | "canvas" | "character" | "item" | "skill" | "generic";
     /** Changes whenever the file's contents change, so views know to refetch. */
     revision: number;
+    /** The classic file this one is or is part of: "Mob" for Mob.wz, Data/Mob/Mob_000.wz or Packs/Mob_000.ms. */
+    top: string;
 }
 
 export interface QuestSummary { id: number; name: string }
@@ -53,8 +56,11 @@ export interface GalleryItem {
     frames: { picture: string; delay: number }[] | null;
 }
 
-/** One entry of a Character file's menu: a root directory ("Weapon"), or "" for the .imgs at the root. */
-export interface CharacterSection { path: string; label: string; count: number }
+/**
+ * One entry of a Character or Item file's menu: a root directory ("Weapon", "Consume"), or "" for the .imgs at the root.
+ * `count` is null for Item tabs that keep a hundred items to an .img, which the server doesn't read just to count.
+ */
+export interface CharacterSection { path: string; label: string; count: number | null }
 
 /**
  * One .img of a Character file. Its picture comes from `characterPictureUrl` and its stats from `characterInfo`, fetched
@@ -253,6 +259,9 @@ export class ApiError extends Error {
     }
 }
 
+/** The open file whose install the library tables read; null or left out for the pinned library. */
+export type Scope = string | null;
+
 export function createApi(base: string) {
     async function request<T>(path: string, init?: RequestInit): Promise<T> {
         let res: Response;
@@ -270,6 +279,7 @@ export function createApi(base: string) {
     }
 
     const q = (path: string) => encodeURIComponent(path);
+    const scope = (file?: Scope) => (file ? `?file=${q(file)}` : "");
 
     return {
         base,
@@ -289,24 +299,26 @@ export function createApi(base: string) {
         /** The names at a .wz file's or .ms pack's root, for the picker. */
         peek: (path: string) => request<FilePeek>(`/api/fs/peek?path=${q(path)}`),
         library: () => request<LibraryFile[]>("/api/library"),
+        // The library tables. `file` is an open file whose install they read when the server isn't pinned to a
+        // folder (components get these bound to their window's file from useLibraryApi); a pinned server ignores it.
         /** Every job's skills in the library, ordered by job id. */
-        skills: () => request<SkillBook[]>("/api/skills"),
-        skillIconUrl: (id: number) => `${base}/api/skills/${id}/icon`,
-        skillBookIconUrl: (job: number) => `${base}/api/skills/books/${job}/icon`,
+        skills: (file?: Scope) => request<SkillBook[]>(`/api/skills${scope(file)}`),
+        skillIconUrl: (id: number, file?: Scope) => `${base}/api/skills/${id}/icon${scope(file)}`,
+        skillBookIconUrl: (job: number, file?: Scope) => `${base}/api/skills/books/${job}/icon${scope(file)}`,
         /** Every mob in the library's Mob data with its stats, ordered by mob id. */
-        mobs: () => request<Mob[]>("/api/mobs"),
+        mobs: (file?: Scope) => request<Mob[]>(`/api/mobs${scope(file)}`),
         /** Every mob with the maps it spawns in, ordered by mob id. */
-        mobLocations: () => request<MobLocations>("/api/mobs/locations"),
-        mobSpriteUrl: (id: number) => `${base}/api/mobs/${id}/sprite`,
+        mobLocations: (file?: Scope) => request<MobLocations>(`/api/mobs/locations${scope(file)}`),
+        mobSpriteUrl: (id: number, file?: Scope) => `${base}/api/mobs/${id}/sprite${scope(file)}`,
         /** Every map with its mobs and NPCs, ordered by map id. */
-        maps: () => request<Maps>("/api/maps"),
-        mapMinimapUrl: (id: number) => `${base}/api/maps/${id}/minimap`,
+        maps: (file?: Scope) => request<Maps>(`/api/maps${scope(file)}`),
+        mapMinimapUrl: (id: number, file?: Scope) => `${base}/api/maps/${id}/minimap${scope(file)}`,
         /** Every item in one inventory tab with its stats, name and description, ordered by item id. */
-        items: (category: ItemCategory) => request<Item[]>(`/api/items/${category}`),
-        itemIconUrl: (id: number) => `${base}/api/items/${id}/icon`,
+        items: (category: ItemCategory, file?: Scope) => request<Item[]>(`/api/items/${category}${scope(file)}`),
+        itemIconUrl: (id: number, file?: Scope) => `${base}/api/items/${id}/icon${scope(file)}`,
         /** Every NPC the library's quests start or end at, ordered by NPC id. */
-        npcQuests: () => request<NpcQuests[]>("/api/npcs/quests"),
-        npcSpriteUrl: (id: number) => `${base}/api/npcs/${id}/sprite`,
+        npcQuests: (file?: Scope) => request<NpcQuests[]>(`/api/npcs/quests${scope(file)}`),
+        npcSpriteUrl: (id: number, file?: Scope) => `${base}/api/npcs/${id}/sprite${scope(file)}`,
         files: () => request<OpenedFile[]>("/api/files"),
         open: (path: string, encryption: string) =>
             request<OpenedFile>("/api/files", {

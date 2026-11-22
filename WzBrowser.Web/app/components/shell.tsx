@@ -169,9 +169,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                                 View only
                             </span>
                         )}
-                        {/* Browse-only viewers see every file as a tab, so there's nothing to open or copy. */}
+                        {/* Browse-only viewers have no raw tree, so there's nothing to copy. */}
                         {!browseOnly && <ClipboardChip />}
-                        {!browseOnly && <button type="button" className="btn-primary py-2" disabled={status !== "online"} onClick={openPicker}>Open file…</button>}
+                        <button type="button" className="btn-primary py-2" disabled={status !== "online"} onClick={openPicker}>Open file…</button>
                         {/* Converting writes to the server's disk, which a read only server never does. */}
                         {!readOnly && <button type="button" className="btn-secondary py-2" disabled={status !== "online"} onClick={() => setXmlOpen(true)}>Convert to XML…</button>}
                         <StatusPill onClick={() => setSettingsOpen(true)} />

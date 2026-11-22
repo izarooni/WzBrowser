@@ -1,8 +1,9 @@
 import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Item, ItemCategory } from "../lib/api";
 import { useConnection } from "../lib/connection";
+import { useLibraryApi } from "../lib/library-api";
 import { Search, XMark } from "./icons";
-import { SkillText } from "./skill-table";
+import { GameText } from "./game-text";
 
 /** Rows rendered at a time; "Show more" adds another page. */
 const PAGE = 150;
@@ -128,7 +129,8 @@ type Loaded = Item[] | { error: string };
 
 /** Every item in the library, a sub-tab per inventory tab, with stats and descriptions; sortable by name, level and price. */
 export const ItemTable = memo(function ItemTable() {
-    const { api, status } = useConnection();
+    const { status } = useConnection();
+    const api = useLibraryApi();
     const [category, setCategory] = useState<ItemCategory>("equip");
     const [loaded, setLoaded] = useState<Partial<Record<ItemCategory, Loaded>>>({});
     const [filter, setFilter] = useState("");
@@ -324,7 +326,7 @@ export const ItemTable = memo(function ItemTable() {
                                     {hasLevels && <td className={`${cell} text-right tabular-nums`}>{level(i) ? num(level(i)) : <span className="text-zinc-400">—</span>}</td>}
                                     <td className={cell}><Stats item={i} /></td>
                                     <td className={`${cell} min-w-64 max-w-md text-zinc-600 dark:text-zinc-400`}>
-                                        {i.desc ? <SkillText text={i.desc} /> : <span className="text-zinc-400">—</span>}
+                                        {i.desc ? <GameText text={i.desc} /> : <span className="text-zinc-400">—</span>}
                                     </td>
                                     <td className={`${cell} text-right tabular-nums`}>{i.price ? num(i.price) : <span className="text-zinc-400">—</span>}</td>
                                 </tr>

@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { MapInfo, Maps } from "../lib/api";
 import { useConnection } from "../lib/connection";
+import { useLibraryApi } from "../lib/library-api";
 import { useScrollIntoView, type Focus } from "../lib/focus";
 import { mapId, mobId, npcId, splitMapName } from "../lib/game-ids";
 import { ChevronDown, ChevronRight, Search, XMark } from "./icons";
@@ -22,7 +23,8 @@ export const MapTable = memo(function MapTable({ focus, onShowMob, onShowNpc }: 
     /** Shows the NPC in the NPCs tab; only NPCs with quests are listed there, so only they are links. */
     onShowNpc?: (id: number) => void;
 }) {
-    const { api, status } = useConnection();
+    const { status } = useConnection();
+    const api = useLibraryApi();
     const [data, setData] = useState<Maps | null>(null);
     const [error, setError] = useState<string | null>(null);
     // NPC id -> how many quests it starts or ends; the NPCs tab lists only these.
@@ -270,7 +272,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 function Minimap({ id }: { id: number }) {
-    const { api } = useConnection();
+    const api = useLibraryApi();
     const [hasMinimap, setHasMinimap] = useState(true);
     return (
         <div className="grid h-40 shrink-0 place-items-center overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50 sm:w-64 dark:border-zinc-800 dark:bg-zinc-950/40">

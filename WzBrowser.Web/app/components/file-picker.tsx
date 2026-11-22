@@ -425,7 +425,7 @@ function LibraryPicker({ open, onClose, onOpened }: PickerProps) {
                         <div className="space-y-2">
                             <DialogTitle className="text-xl font-semibold">Open a WZ file</DialogTitle>
                             <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                                {browseOnly ? "Pick a quest archive or Etc.wz to browse its quests or Cash Shop entries." : "Pick one of the files this server offers."}
+                                {browseOnly ? "Pick a file to browse: quest archives, Etc.wz, and the Mob, Skill, Map, Item and Npc files." : "Pick one of the files this server offers."}
                             </p>
                         </div>
                         <button type="button" onClick={onClose} aria-label="Close" className="btn-close">
@@ -451,7 +451,7 @@ function LibraryPicker({ open, onClose, onOpened }: PickerProps) {
                             {!files ? (
                                 <div className="space-y-2">{Array.from({ length: 3 }, (_, i) => <div key={i} className="skeleton h-12 rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
                             ) : files.length === 0 ? (
-                                <p className="text-sm text-zinc-500">{browseOnly ? "The library folder has no quest archives or Etc.wz." : "The library folder has no .wz files or .ms packs."}</p>
+                                <p className="text-sm text-zinc-500">{browseOnly ? "The library folder has no files that can be browsed." :"The library folder has no .wz files or .ms packs."}</p>
                             ) : (
                                 <ul className="-mx-2 max-h-[50dvh] space-y-1 overflow-y-auto px-2">
                                     {visible.map((f) => (

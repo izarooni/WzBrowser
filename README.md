@@ -39,7 +39,13 @@ WzBrowser.exe [--port 5178] [--host 127.0.0.1] [--root FOLDER] [--read-only] [--
 Without a root, the web app can browse your whole disk to open files. With a root:
 - only `.wz` files inside that folder can be opened or saved to;
 - **Open file…** shows a searchable list of them;
-- extra tabs appear for the whole library: Skills, Mobs, Maps, Items and NPCs.
+- files get a tab with a table of the whole library's data: Mobs on Mob, Mob Locations on Etc, Maps on Map, Items on Item and NPCs on Npc.
+
+Without a root, those tables read the install the open file is in instead (its folder, or up to two folders up).
+
+Character.wz, Item.wz and Skill.wz open on a grid of thumbnails by section (a slot, an inventory tab, a job). Clicking one shows its properties, which can be edited in place, and String's name and description, which are saved to String.wz.
+
+With `--read-only` as well, only files with a view or table of their own can be opened, and only that view and table are shown: no raw tree.
 
 ## Running the web app
 

@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Mob } from "../lib/api";
 import { useConnection } from "../lib/connection";
+import { useLibraryApi } from "../lib/library-api";
 import { useScrollIntoView, type Focus } from "../lib/focus";
 import { mobId } from "../lib/game-ids";
 import { Search, XMark } from "./icons";
@@ -66,7 +67,8 @@ export const MobTable = memo(function MobTable({ focus }: {
     /** The mob another tab asked to show: it's scrolled to and highlighted. */
     focus: Focus | null;
 }) {
-    const { api, status } = useConnection();
+    const { status } = useConnection();
+    const api = useLibraryApi();
     const [mobs, setMobs] = useState<Mob[] | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [filter, setFilter] = useState("");

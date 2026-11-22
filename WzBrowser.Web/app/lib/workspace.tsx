@@ -232,11 +232,25 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
     const addWindow = useCallback((file: OpenedFile) => {
         const s = stateRef.current;
-        const n = s.wins.length % 8;
-        const layout = layouts.current[file.id] ?? {
-            // Quest archives show a list beside a detail pane and Etc.wz a wide table, so they open bigger than a plain tree.
-            x: 48 + n * 36 - s.pan.x, y: 32 + n * 36 - s.pan.y, w: file.kind === "generic" ? 680 : 980, h: file.kind === "generic" ? 560 : 620, collapsed: false,
-        };
+        const saved = layouts.current[file.id];
+        // Quest archives show a list beside a detail pane, and Etc.wz and the files with a library table a wide table,
+        // so they open bigger than a plain tree.
+        const plain = file.kind === "generic" && !["mob", "skill", "map", "item", "npc"].includes((file.top ?? "").toLowerCase());
+        let w = plain ? 680 : 980;
+        let h = plain ? 560 : 620;
+        if (saved) { w = saved.w; h = saved.h; }
+        // Open in the middle of the visible canvas, whatever the pan, so a new window never lands off screen.
+        // A remembered size is kept but not a remembered position. Each open window nudges the next one down
+        // and right so several opened in a row don't stack exactly.
+        const rect = document.querySelector("[data-canvas]")?.getBoundingClientRect();
+        const vw = rect?.width ?? window.innerWidth;
+        const vh = rect?.height ?? window.innerHeight;
+        w = Math.max(320, Math.min(w, vw - 32));
+        h = Math.max(200, Math.min(h, vh - 32));
+        const n = s.wins.length % 6;
+        const sx = Math.max(16, Math.min((vw - w) / 2 + n * 28, vw - w - 16));
+        const sy = Math.max(16, Math.min((vh - h) / 2 + n * 28, vh - h - 16));
+        const layout = { x: Math.round(sx - s.pan.x), y: Math.round(sy - s.pan.y), w, h, collapsed: false };
         dispatch({ type: "add", fileId: file.id, layout });
     }, []);
 

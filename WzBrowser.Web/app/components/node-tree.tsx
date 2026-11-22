@@ -10,6 +10,7 @@ import { download } from "../lib/download";
 import { copyText } from "../lib/copy-text";
 import { ContextMenu, type MenuItem } from "./context-menu";
 import { NewPropertyDialog } from "./new-property-dialog";
+import { PaneResizer, paneVar, usePaneWidth, type PaneWidth } from "./pane-resizer";
 
 type Level =
     | { status: "loading" }
@@ -49,6 +50,7 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
     const file = files[fileId];
 
     const [levels, setLevels] = useState<Record<string, Level>>({});
+    const detailPane = usePaneWidth("node-details", 288, 240, 900);
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
     /** The node the details pane shows and the keyboard moves from. */
     const [selected, setSelectedOnly] = useState<string | null>(null);
@@ -648,7 +650,9 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
                 </div>
             </div>
 
+            <PaneResizer pane={detailPane} side="right" label="Resize the details" className="hidden @xl:block" />
             <Detail
+                pane={detailPane}
                 fileId={fileId}
                 path={selected}
                 node={selectedNode}
@@ -688,7 +692,8 @@ function TreeSkeleton() {
     );
 }
 
-function Detail({ fileId, path, node, fileName, childCount, canPasteHere, onCopy, onCut, onPaste, onDelete }: {
+function Detail({ pane, fileId, path, node, fileName, childCount, canPasteHere, onCopy, onCut, onPaste, onDelete }: {
+    pane: PaneWidth;
     fileId: string;
     path: string | null;
     node: WzNode | null;
@@ -713,11 +718,11 @@ function Detail({ fileId, path, node, fileName, childCount, canPasteHere, onCopy
     useEffect(() => { setZoom(1); setImgFailed(false); setCopied(false); setDropping(false); }, [path]);
     useEffect(() => { setImgFailed(false); }, [revision]);
 
-    const shell = "max-h-[42%] shrink-0 overflow-auto border-t border-zinc-100 @xl:max-h-none @xl:w-72 @xl:border-l @xl:border-t-0 dark:border-zinc-800";
+    const shell = "max-h-[42%] shrink-0 overflow-auto border-t border-zinc-100 @xl:max-h-none @xl:w-(--pane-w) @xl:border-l @xl:border-t-0 dark:border-zinc-800";
 
     if (path == null || !node) {
         return (
-            <aside className={`${shell} grid place-items-center p-6 text-center`}>
+            <aside style={paneVar(pane)} className={`${shell} grid place-items-center p-6 text-center`}>
                 <p className="text-sm leading-6 text-zinc-500">Select a node to see details. <kbd className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px] dark:bg-zinc-800">Ctrl</kbd>/<kbd className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px] dark:bg-zinc-800">Shift</kbd>+click selects several.<br />Drag nodes to another window to copy them, hold <kbd className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px] dark:bg-zinc-800">Shift</kbd> to move.</p>
             </aside>
         );
@@ -761,7 +766,7 @@ function Detail({ fileId, path, node, fileName, childCount, canPasteHere, onCopy
     const act = "rounded-lg px-3 py-1.5 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-zinc-300 dark:hover:bg-zinc-800";
 
     return (
-        <aside className={`${shell} space-y-5 p-5`}>
+        <aside style={paneVar(pane)} className={`${shell} space-y-5 p-5`}>
             <div className="space-y-2.5">
                 <div className="flex items-start justify-between gap-3">
                     {isProperty ? (
@@ -886,7 +891,7 @@ const NOT_PROPERTY = new Set(["file", "directory", "image"]);
  * Text that turns into an input when clicked (or focused and Enter/F2 pressed). Enter saves, Esc cancels,
  * leaving the field saves a valid change. Multiline fields take Shift+Enter for a new line.
  */
-function InlineEdit({ label, value, multiline = false, check, onSave, className = "" }: {
+export function InlineEdit({ label, value, multiline = false, check, onSave, className = "" }: {
     label: string;
     value: string;
     multiline?: boolean;
@@ -1069,16 +1074,9 @@ function FrameAnimation({ fileId, path, minFrames = 2, fallback = null }: {
     const cur = frames[index % count];
     const btn = "rounded-md px-2.5 py-1 text-xs font-semibold transition";
 
+    // The controls sit above the picture: below it, they'd jump up and down as frames of different heights play.
     return (
         <div className="space-y-3">
-            <div className="checker grid max-h-64 min-h-24 place-items-center overflow-auto rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
-                <img
-                    src={api.pngUrl(fileId, joinPath(path, cur.name), revision)}
-                    alt={`Frame ${cur.name}`}
-                    draggable={false}
-                    style={{ imageRendering: "pixelated", width: cur.width ? cur.width * zoom : undefined, maxWidth: "none" }}
-                />
-            </div>
             <div className="flex items-center justify-between gap-3">
                 <div className={`flex items-center gap-2 ${count < 2 ? "invisible" : ""}`}>
                     <button type="button" onClick={() => setPlaying((p) => !p)}
@@ -1098,6 +1096,14 @@ function FrameAnimation({ fileId, path, minFrames = 2, fallback = null }: {
             </div>
             {count > 1 && <input type="range" min={0} max={count - 1} value={index % count} aria-label="Frame"
                 onChange={(e) => { setPlaying(false); setIndex(Number(e.target.value)); }} className="w-full" />}
+            <div className="checker grid max-h-64 min-h-24 place-items-center overflow-auto rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
+                <img
+                    src={api.pngUrl(fileId, joinPath(path, cur.name), revision)}
+                    alt={`Frame ${cur.name}`}
+                    draggable={false}
+                    style={{ imageRendering: "pixelated", width: cur.width ? cur.width * zoom : undefined, maxWidth: "none" }}
+                />
+            </div>
         </div>
     );
 }

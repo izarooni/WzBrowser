@@ -1,29 +1,64 @@
-import { memo, useRef, useState, type PointerEvent } from "react";
+import { memo, useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { useConnection } from "../lib/connection";
+import { LibraryScopeProvider } from "../lib/library-api";
 import { MIN_H, MIN_W, useActions, useWorkspaceData, type Win } from "../lib/workspace";
 import { Archive, Download, Minus, Plus, Undo, XMark } from "./icons";
 import { CanvasGallery } from "./canvas-gallery";
 import { CharacterBrowser } from "./character-browser";
 import { CommodityEditor } from "./commodity-editor";
+import { ItemTable } from "./item-table";
+import { MapTable } from "./map-table";
+import { MobLocationTable } from "./mob-locations";
+import { MobTable } from "./mob-table";
 import { NodeTree } from "./node-tree";
+import { NpcQuestTable } from "./npc-quests";
 import { QuestBrowser } from "./quest-browser";
 
 type Gesture =
     | { kind: "move"; sx: number; sy: number; x: number; y: number }
     | { kind: "resize"; sx: number; sy: number; w: number; h: number; dx: boolean; dy: boolean };
 
+/** The file's own view ("main"), the library's table for its kind of data ("data"), and the raw tree. */
+type View = "main" | "data" | "raw";
+
+/**
+ * The library table a file gets as a tab, keyed by the classic file it is or is part of (lowercase). The tables read
+ * the pinned library, or without one the install the file sits in, from disk, so they don't show unsaved edits. Keep
+ * in step with the server's TableTops, which lets a browse-only server open these files.
+ */
+const DATA_VIEWS: Record<string, { label: string; has: "mobs" | "mobLocations" | "maps" | "items" | "npcs"; view: () => ReactNode }> = {
+    mob: { label: "Mobs", has: "mobs", view: () => <MobTable focus={null} /> },
+    etc: { label: "Mob Locations", has: "mobLocations", view: () => <MobLocationTable focus={null} /> },
+    map: { label: "Maps", has: "maps", view: () => <MapTable focus={null} /> },
+    item: { label: "Items", has: "items", view: () => <ItemTable /> },
+    npc: { label: "NPCs", has: "npcs", view: () => <NpcQuestTable focus={null} /> },
+};
+
 
 /** A floating, draggable, resizable window showing one open WZ file. */
 export const WzWindow = memo(function WzWindow({ win, focused }: { win: Win; focused: boolean }) {
     const actions = useActions();
     const { files } = useWorkspaceData();
-    const { browseOnly } = useConnection();
+    const connection = useConnection();
+    const { browseOnly } = connection;
     const file = files[win.fileId];
     const gesture = useRef<Gesture | null>(null);
     // Quest archives open on the quest browser, Etc.wz on the Commodity table, and _Canvas and Character files on their
     // thumbnails; the raw tree is one tab away.
-    const [tab, setTab] = useState<"main" | "raw">("main");
-    const mainLabel = file?.kind === "quest" ? "Quests" : file?.kind === "etc" ? "Commodity" : file?.kind === "canvas" || file?.kind === "character" ? "Thumbnails" : null;
+    const mainLabel = file?.kind === "quest" ? "Quests" : file?.kind === "etc" ? "Commodity" : file?.kind === "canvas" || file?.kind === "character" || file?.kind === "item" ? "Thumbnails" : file?.kind === "skill" ? "Skills" : null;
+    // Mob, Skill, Etc, Map, Item and Npc files (or their modular parts) also get the library's table for that data,
+    // browse-only or not.
+    const dataDef = file && file.kind !== "canvas" ? DATA_VIEWS[(file.top ?? "").toLowerCase()] : undefined;
+    // A pinned library says up front which data it has. Without one the table reads this file's install, which
+    // can't be told without reading it, so the tab is always offered and the table says when there's nothing.
+    const dataView = dataDef && (!connection.library || connection[dataDef.has]) ? dataDef : undefined;
+    const views = ([mainLabel && "main", dataView && "data", !browseOnly && "raw"] as const).filter((v): v is View => !!v);
+    // Null until a tab is picked: the first view is shown, even once the file (and with it the views) has loaded.
+    const [tab, setTab] = useState<View | null>(null);
+    const current = tab && views.includes(tab) ? tab : views[0];
+    // The data table loads the whole library's data, so it's only mounted once shown, then kept to hold its state.
+    const [dataShown, setDataShown] = useState(false);
+    useEffect(() => { if (current === "data") setDataShown(true); }, [current]);
     // Browse-only viewers get the main view alone: no tabs, no raw tree, no "show in raw tree" buttons.
     const openRaw = browseOnly ? undefined : (path: string) => { setTab("raw"); actions.reveal(win.fileId, path); };
 
@@ -121,44 +156,49 @@ export const WzWindow = memo(function WzWindow({ win, focused }: { win: Win; foc
                 </button>
             </header>
 
-            {!win.collapsed && mainLabel && !browseOnly && (
+            {!win.collapsed && views.length > 1 && (
                 <div role="tablist" aria-label="View" className="flex shrink-0 gap-1 border-b border-zinc-100 px-4 pt-2 dark:border-zinc-800">
-                    {(["main", "raw"] as const).map((t) => (
+                    {views.map((t) => (
                         <button
                             key={t}
                             type="button"
                             role="tab"
-                            aria-selected={tab === t}
+                            aria-selected={current === t}
                             onClick={() => setTab(t)}
                             className={`-mb-px rounded-t-lg border-b-2 px-4 py-2 text-[13px] font-medium transition ${
-                                tab === t
+                                current === t
                                     ? "border-accent-500 text-accent-700 dark:text-accent-300"
                                     : "border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
                             }`}
                         >
-                            {t === "main" ? mainLabel : "Raw tree"}
+                            {t === "main" ? mainLabel : t === "data" ? dataView!.label : "Raw tree"}
                         </button>
                     ))}
                 </div>
             )}
-            {/* Both views stay mounted (the inactive one is hidden) so the raw tree keeps its state and can be revealed from the main view. */}
+            {/* The views stay mounted (the inactive ones are hidden) so the raw tree keeps its state and can be revealed from the main view. */}
             {!win.collapsed && mainLabel && (
-                <div className={tab === "main" || browseOnly ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+                <div className={current === "main" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
                     {file?.kind === "quest"
                         ? <QuestBrowser fileId={win.fileId} revision={file.revision} onOpenRaw={openRaw} />
                         : file?.kind === "canvas"
                             ? <CanvasGallery fileId={win.fileId} revision={file.revision} onOpenRaw={openRaw} />
-                            : file?.kind === "character"
-                                ? <CharacterBrowser fileId={win.fileId} revision={file.revision} onOpenRaw={openRaw} />
+                            : file?.kind === "character" || file?.kind === "item" || file?.kind === "skill"
+                                ? <CharacterBrowser fileId={win.fileId} kind={file.kind} revision={file.revision} onOpenRaw={openRaw} />
                                 : <CommodityEditor fileId={win.fileId} revision={file!.revision} onOpenRaw={openRaw} />}
                 </div>
             )}
+            {!win.collapsed && dataView && (dataShown || current === "data") && (
+                <div className={current === "data" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+                    <LibraryScopeProvider fileId={win.fileId}>{dataView.view()}</LibraryScopeProvider>
+                </div>
+            )}
             {!win.collapsed && !browseOnly && (
-                <div className={mainLabel && tab === "main" ? "hidden" : "flex min-h-0 flex-1 flex-col"}>
+                <div className={current === "raw" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
                     <NodeTree fileId={win.fileId} />
                 </div>
             )}
-            {!win.collapsed && browseOnly && !mainLabel && (
+            {!win.collapsed && views.length === 0 && (
                 <p className="grid flex-1 place-items-center p-8 text-center text-sm text-zinc-500">This file has no view of its own.</p>
             )}
             </div>
