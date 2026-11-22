@@ -94,10 +94,6 @@ public sealed partial class WzService
     private static string OutputFolderName(string path) =>
         System.Text.RegularExpressions.Regex.Replace(System.IO.Path.GetFileNameWithoutExtension(path), @"_(\d{3}|\d{5})$", "") + ".wz";
 
-    /// <summary>A modular file's index ({name}.wz beside {name}_000.wz) holds no data of its own.</summary>
-    private static bool IsIndexStub(string path) =>
-        File.Exists(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(path)!, System.IO.Path.GetFileNameWithoutExtension(path) + "_000.wz"));
-
     private void RunXmlExport(XmlExportJob job, string? encryption)
     {
         // The serializer writes doubles with the current culture; servers parse them with a '.'.
@@ -132,7 +128,7 @@ public sealed partial class WzService
     {
         // A file the user already has open is converted as it is in memory, unsaved edits included, and stays open.
         var existed = _files.ContainsKey(FileId(f.Path));
-        var dto = Open(f.Path, encryption, hidden: true);
+        var dto = Open(f.Path, encryption, hidden: true, report: false);
         var entry = Get(dto.Id);
         try
         {

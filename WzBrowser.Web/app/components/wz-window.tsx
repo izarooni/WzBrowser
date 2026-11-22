@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { useConnection } from "../lib/connection";
-import { LibraryScopeProvider } from "../lib/library-api";
+import type { OpenedFile } from "../lib/api";
+import { LibraryScopeProvider, tableTopOf, type TableTop } from "../lib/library-api";
 import { MIN_H, MIN_W, useActions, useWorkspaceData, type Win } from "../lib/workspace";
 import { Archive, Download, Minus, Plus, Undo, XMark } from "./icons";
 import { CanvasGallery } from "./canvas-gallery";
@@ -21,18 +22,53 @@ type Gesture =
 /** The file's own view ("main"), the library's table for its kind of data ("data"), and the raw tree. */
 type View = "main" | "data" | "raw";
 
+interface DataView {
+    label: string;
+    /** The health check's flag saying a pinned library has this data. */
+    has: "mobs" | "mobLocations" | "maps" | "items" | "npcs";
+    view: () => ReactNode;
+}
+
 /**
- * The library table a file gets as a tab, keyed by the classic file it is or is part of (lowercase). The tables read
- * the pinned library, or without one the install the file sits in, from disk, so they don't show unsaved edits. Keep
- * in step with the server's TableTops, which lets a browse-only server open these files.
+ * The library table a file gets as a tab (see {@link tableTopOf}). The tables read the pinned library, or without one
+ * the install the file sits in, from disk, so they don't show unsaved edits.
  */
-const DATA_VIEWS: Record<string, { label: string; has: "mobs" | "mobLocations" | "maps" | "items" | "npcs"; view: () => ReactNode }> = {
+const DATA_VIEWS: Record<TableTop, DataView> = {
     mob: { label: "Mobs", has: "mobs", view: () => <MobTable focus={null} /> },
     etc: { label: "Mob Locations", has: "mobLocations", view: () => <MobLocationTable focus={null} /> },
     map: { label: "Maps", has: "maps", view: () => <MapTable focus={null} /> },
     item: { label: "Items", has: "items", view: () => <ItemTable /> },
     npc: { label: "NPCs", has: "npcs", view: () => <NpcQuestTable focus={null} /> },
 };
+
+/** The name of a file's own view's tab, or null when it only has the raw tree. */
+function mainLabelOf(kind: OpenedFile["kind"] | undefined) {
+    switch (kind) {
+        case "quest": return "Quests";
+        case "etc": return "Commodity";
+        case "canvas":
+        case "character":
+        case "item": return "Thumbnails";
+        case "skill": return "Skills";
+        default: return null;
+    }
+}
+
+/** A file's own view: the quest browser, the _Canvas gallery, the Character/Item/Skill thumbnails, or Commodity. */
+function MainView({ file, onOpenRaw }: { file: OpenedFile; onOpenRaw?: (path: string) => void }) {
+    switch (file.kind) {
+        case "quest":
+            return <QuestBrowser fileId={file.id} revision={file.revision} onOpenRaw={onOpenRaw} />;
+        case "canvas":
+            return <CanvasGallery fileId={file.id} revision={file.revision} onOpenRaw={onOpenRaw} />;
+        case "character":
+        case "item":
+        case "skill":
+            return <CharacterBrowser fileId={file.id} kind={file.kind} revision={file.revision} onOpenRaw={onOpenRaw} />;
+        default:
+            return <CommodityEditor fileId={file.id} revision={file.revision} onOpenRaw={onOpenRaw} />;
+    }
+}
 
 
 /** A floating, draggable, resizable window showing one open WZ file. */
@@ -45,22 +81,41 @@ export const WzWindow = memo(function WzWindow({ win, focused }: { win: Win; foc
     const gesture = useRef<Gesture | null>(null);
     // Quest archives open on the quest browser, Etc.wz on the Commodity table, and _Canvas and Character files on their
     // thumbnails; the raw tree is one tab away.
-    const mainLabel = file?.kind === "quest" ? "Quests" : file?.kind === "etc" ? "Commodity" : file?.kind === "canvas" || file?.kind === "character" || file?.kind === "item" ? "Thumbnails" : file?.kind === "skill" ? "Skills" : null;
-    // Mob, Skill, Etc, Map, Item and Npc files (or their modular parts) also get the library's table for that data,
+    const mainLabel = mainLabelOf(file?.kind);
+    // Mob, Etc, Map, Item and Npc files (or their modular parts) also get the library's table for that data,
     // browse-only or not.
-    const dataDef = file && file.kind !== "canvas" ? DATA_VIEWS[(file.top ?? "").toLowerCase()] : undefined;
+    const tableTop = file ? tableTopOf(file) : null;
+    const dataDefinition = tableTop ? DATA_VIEWS[tableTop] : undefined;
     // A pinned library says up front which data it has. Without one the table reads this file's install, which
     // can't be told without reading it, so the tab is always offered and the table says when there's nothing.
-    const dataView = dataDef && (!connection.library || connection[dataDef.has]) ? dataDef : undefined;
-    const views = ([mainLabel && "main", dataView && "data", !browseOnly && "raw"] as const).filter((v): v is View => !!v);
+    const dataOffered = dataDefinition && (!connection.library || connection[dataDefinition.has]);
+    const dataView = dataOffered ? dataDefinition : undefined;
+    const views: View[] = [];
+    if (mainLabel) views.push("main");
+    if (dataView) views.push("data");
+    if (!browseOnly) views.push("raw");
     // Null until a tab is picked: the first view is shown, even once the file (and with it the views) has loaded.
     const [tab, setTab] = useState<View | null>(null);
     const current = tab && views.includes(tab) ? tab : views[0];
     // The data table loads the whole library's data, so it's only mounted once shown, then kept to hold its state.
     const [dataShown, setDataShown] = useState(false);
-    useEffect(() => { if (current === "data") setDataShown(true); }, [current]);
+    useEffect(function keepDataMounted() {
+        if (current === "data") setDataShown(true);
+    }, [current]);
+
+    function showInRawTree(path: string) {
+        setTab("raw");
+        actions.reveal(win.fileId, path);
+    }
+
+    function tabLabel(view: View) {
+        if (view === "main") return mainLabel;
+        if (view === "data") return dataView!.label;
+        return "Raw tree";
+    }
+
     // Browse-only viewers get the main view alone: no tabs, no raw tree, no "show in raw tree" buttons.
-    const openRaw = browseOnly ? undefined : (path: string) => { setTab("raw"); actions.reveal(win.fileId, path); };
+    const openRaw = browseOnly ? undefined : showInRawTree;
 
     const begin = (e: PointerEvent<HTMLElement>, g: Gesture) => {
         if (e.button !== 0) return;
@@ -158,34 +213,29 @@ export const WzWindow = memo(function WzWindow({ win, focused }: { win: Win; foc
 
             {!win.collapsed && views.length > 1 && (
                 <div role="tablist" aria-label="View" className="flex shrink-0 gap-1 border-b border-zinc-100 px-4 pt-2 dark:border-zinc-800">
-                    {views.map((t) => (
+                    {views.map((view) => (
                         <button
-                            key={t}
+                            key={view}
                             type="button"
                             role="tab"
-                            aria-selected={current === t}
-                            onClick={() => setTab(t)}
+                            aria-selected={current === view}
+                            onClick={() => setTab(view)}
                             className={`-mb-px rounded-t-lg border-b-2 px-4 py-2 text-[13px] font-medium transition ${
-                                current === t
+                                current === view
                                     ? "border-accent-500 text-accent-700 dark:text-accent-300"
                                     : "border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
                             }`}
                         >
-                            {t === "main" ? mainLabel : t === "data" ? dataView!.label : "Raw tree"}
+                            {tabLabel(view)}
                         </button>
                     ))}
                 </div>
             )}
-            {/* The views stay mounted (the inactive ones are hidden) so the raw tree keeps its state and can be revealed from the main view. */}
-            {!win.collapsed && mainLabel && (
+            {/* The views stay mounted (the inactive ones are hidden) so the raw tree keeps its state and can be
+                revealed from the main view. */}
+            {!win.collapsed && file && mainLabel && (
                 <div className={current === "main" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-                    {file?.kind === "quest"
-                        ? <QuestBrowser fileId={win.fileId} revision={file.revision} onOpenRaw={openRaw} />
-                        : file?.kind === "canvas"
-                            ? <CanvasGallery fileId={win.fileId} revision={file.revision} onOpenRaw={openRaw} />
-                            : file?.kind === "character" || file?.kind === "item" || file?.kind === "skill"
-                                ? <CharacterBrowser fileId={win.fileId} kind={file.kind} revision={file.revision} onOpenRaw={openRaw} />
-                                : <CommodityEditor fileId={win.fileId} revision={file!.revision} onOpenRaw={openRaw} />}
+                    <MainView file={file} onOpenRaw={openRaw} />
                 </div>
             )}
             {!win.collapsed && dataView && (dataShown || current === "data") && (

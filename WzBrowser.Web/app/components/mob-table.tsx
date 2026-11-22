@@ -5,6 +5,7 @@ import { useLibraryApi } from "../lib/library-api";
 import { useScrollIntoView, type Focus } from "../lib/focus";
 import { mobId } from "../lib/game-ids";
 import { Search, XMark } from "./icons";
+import { errorMessage } from "../lib/errors";
 
 /** Rows rendered at a time; "Show more" adds another page. */
 const PAGE = 150;
@@ -84,7 +85,7 @@ export const MobTable = memo(function MobTable({ focus }: {
         let cancelled = false;
         api.mobs().then(
             (d) => { if (!cancelled) { setMobs(d); setError(null); } },
-            (e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); },
+            (e) => { if (!cancelled) setError(errorMessage(e)); },
         );
         return () => { cancelled = true; };
     }, [api, status, mobs]);

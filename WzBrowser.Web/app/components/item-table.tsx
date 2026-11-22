@@ -4,6 +4,7 @@ import { useConnection } from "../lib/connection";
 import { useLibraryApi } from "../lib/library-api";
 import { Search, XMark } from "./icons";
 import { GameText } from "./game-text";
+import { errorMessage } from "../lib/errors";
 
 /** Rows rendered at a time; "Show more" adds another page. */
 const PAGE = 150;
@@ -144,7 +145,7 @@ export const ItemTable = memo(function ItemTable() {
         let cancelled = false;
         api.items(category).then(
             (list) => { if (!cancelled) setLoaded((l) => ({ ...l, [category]: list })); },
-            (e) => { if (!cancelled) setLoaded((l) => ({ ...l, [category]: { error: e instanceof Error ? e.message : String(e) } })); },
+            (e) => { if (!cancelled) setLoaded((l) => ({ ...l, [category]: { error: errorMessage(e) } })); },
         );
         return () => { cancelled = true; };
     }, [api, status, category, loaded]);

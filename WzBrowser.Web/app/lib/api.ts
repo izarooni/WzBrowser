@@ -30,10 +30,12 @@ export interface OpenedFile {
     /** In-memory edits not yet saved to a new file. */
     dirty: boolean;
     savedTo: string | null;
-    /** "quest" for a quest archive (QuestInfo.img + Check.img at the root, or a modular QuestData with one {id}.img per quest);
-     * "etc" when Commodity.img is at the root; "canvas" for a modular install's picture file (Data/Mob/_Canvas/_Canvas_000.wz);
-     * "character" for Character.wz or one of its modular parts; "item" for Item.wz or one of its; "skill" for Skill.wz
-     * or one of its. */
+    /**
+     * "quest" for a quest archive (QuestInfo.img + Check.img at the root, or a modular QuestData with one {id}.img per
+     * quest); "etc" when Commodity.img is at the root; "canvas" for a modular install's picture file
+     * (Data/Mob/_Canvas/_Canvas_000.wz); "character" for Character.wz or one of its modular parts; "item" for Item.wz
+     * or one of its; "skill" for Skill.wz or one of its.
+     */
     kind: "quest" | "etc" | "canvas" | "character" | "item" | "skill" | "generic";
     /** Changes whenever the file's contents change, so views know to refetch. */
     revision: number;
@@ -72,6 +74,32 @@ export interface CharacterItem {
     name: string | null;
     desc: string | null;
     stringPath: string | null;
+    /** String's other text for it, in order: a skill's per-level descriptions ("h", "h1", "h2", ...), or anything else
+     * the entry holds. Null when there's none (an older server leaves it out). */
+    texts?: CharacterText[] | null;
+}
+
+export interface CharacterText { key: string; value: string }
+
+/** One section's items; `stringFileId` is the String file their names came from. */
+export interface CharacterItems { items: CharacterItem[]; stringFileId: string | null }
+
+/** Name, description and other text to set; `texts` by key ("h1", ...). */
+export interface CharacterStringsRequest {
+    id: number;
+    section: string;
+    name: string;
+    desc: string;
+    texts?: Record<string, string>;
+}
+
+/** The String file (now open with the change unsaved) and the entry as it now is. */
+export interface CharacterStringsResult {
+    file: OpenedFile;
+    path: string;
+    name: string | null;
+    desc: string | null;
+    texts: CharacterText[] | null;
 }
 
 /** A property and everything below it, in file order. */
@@ -151,10 +179,6 @@ export interface FilePeek { count: number; names: string[] }
 /** A file a pinned server offers; `name` is its path relative to the library folder. `kind` is set in browse-only mode. */
 export interface LibraryFile { name: string; path: string; size: number; kind?: "quest" | "etc" | null }
 
-/** One skill. `levels` is what each level does (or a single shared template); `hidden` skills are client-internal helpers. */
-export interface Skill { id: number; name: string | null; desc: string | null; maxLevel: number; hidden: boolean; levels: string[] }
-/** A job's skills (0 Beginner, 100 Warrior, 110 Fighter, ...) and its skill book's title. */
-export interface SkillBook { job: number; book: string | null; hasIcon: boolean; skills: Skill[] }
 
 /**
  * A mob's stats from its info node in Mob data (anything it doesn't set is 0).
@@ -262,20 +286,75 @@ export class ApiError extends Error {
 /** The open file whose install the library tables read; null or left out for the pinned library. */
 export type Scope = string | null;
 
+/** What the server can show, from its health check. The table flags are only set by a server pinned to a library. */
+export interface Health {
+    status: string;
+    port: number;
+    version: string;
+    /** The server is pinned to a folder, so files come from `library()` and `fs` is refused. */
+    library?: boolean;
+    /** The server was started with --read-only, so files may be viewed but not changed. */
+    readOnly?: boolean;
+    /** Read only and pinned to a library folder: only files with a view or table of their own, and no raw tree. */
+    browseOnly?: boolean;
+    /** The library has Mob data, so `mobs()` has something to show. */
+    mobs?: boolean;
+    /** The library's Etc has MobLocation.img, so `mobLocations()` has something to show. */
+    mobLocations?: boolean;
+    /** The library has Map files, so `maps()` has something to show. */
+    maps?: boolean;
+    /** The library has Item or Character files, so `items()` has something to show. */
+    items?: boolean;
+    /** The library has a quest archive, so `npcQuests()` has something to show. */
+    npcs?: boolean;
+}
+
+type FilesReadListener = (paths: string[]) => void;
+
+/**
+ * Called with the other files a request read on behalf of the file it was about (String.wz for names, Npc.wz for a
+ * sprite, ...), as the server reports them, so each can get a window.
+ */
+const readListeners = new Set<FilesReadListener>();
+
+export function onFilesRead(listener: FilesReadListener) {
+    readListeners.add(listener);
+    return function stopListening() {
+        readListeners.delete(listener);
+    };
+}
+
+function decodePath(encoded: string) {
+    try {
+        return decodeURIComponent(encoded);
+    } catch {
+        return "";
+    }
+}
+
+function reportReads(response: Response) {
+    const value = response.headers.get("X-Wz-Read");
+    if (!value || readListeners.size === 0) return;
+    const paths = value.split(",").map(decodePath).filter(Boolean);
+    if (paths.length === 0) return;
+    for (const listener of readListeners) listener(paths);
+}
+
 export function createApi(base: string) {
     async function request<T>(path: string, init?: RequestInit): Promise<T> {
-        let res: Response;
+        let response: Response;
         try {
-            res = await fetch(base + path, init);
+            response = await fetch(base + path, init);
         } catch {
             throw new ApiError(`Cannot reach the WzBrowser API at ${base}`, 0);
         }
-        if (!res.ok) {
-            let message = res.statusText;
-            try { message = (await res.json()).error ?? message; } catch { /* not json */ }
-            throw new ApiError(message, res.status);
+        if (!response.ok) {
+            let message = response.statusText;
+            try { message = (await response.json()).error ?? message; } catch { /* not json */ }
+            throw new ApiError(message, response.status);
         }
-        return res.status === 204 ? (undefined as T) : res.json();
+        reportReads(response);
+        return response.status === 204 ? (undefined as T) : response.json();
     }
 
     const q = (path: string) => encodeURIComponent(path);
@@ -283,28 +362,13 @@ export function createApi(base: string) {
 
     return {
         base,
-        /**
-         * `library`: the server is pinned to a folder, so files come from `library()` and `fs` is refused.
-         * `readOnly`: the server was started with --read-only, so it may be viewed but not changed.
-         * `browseOnly`: read only and pinned to a library folder, so only quest archives and Etc.wz are offered, through their own views (no raw tree).
-         * `skills`: the library has skill data, so `skills()` has something to show.
-         * `mobs`: the library has Mob data, so `mobs()` has something to show.
-         * `mobLocations`: the library's Etc has MobLocation.img, so `mobLocations()` has something to show.
-         * `maps`: the library has Map files, so `maps()` has something to show.
-         * `items`: the library has Item or Character files, so `items()` has something to show.
-         * `npcs`: the library has a quest archive, so `npcQuests()` has something to show.
-         */
-        health: () => request<{ status: string; port: number; version: string; library?: boolean; readOnly?: boolean; browseOnly?: boolean; skills?: boolean; mobs?: boolean; mobLocations?: boolean; maps?: boolean; items?: boolean; npcs?: boolean }>("/api/health"),
+        health: () => request<Health>("/api/health"),
         fs: (path = "") => request<FsListing>(`/api/fs?path=${q(path)}`),
         /** The names at a .wz file's or .ms pack's root, for the picker. */
         peek: (path: string) => request<FilePeek>(`/api/fs/peek?path=${q(path)}`),
         library: () => request<LibraryFile[]>("/api/library"),
         // The library tables. `file` is an open file whose install they read when the server isn't pinned to a
         // folder (components get these bound to their window's file from useLibraryApi); a pinned server ignores it.
-        /** Every job's skills in the library, ordered by job id. */
-        skills: (file?: Scope) => request<SkillBook[]>(`/api/skills${scope(file)}`),
-        skillIconUrl: (id: number, file?: Scope) => `${base}/api/skills/${id}/icon${scope(file)}`,
-        skillBookIconUrl: (job: number, file?: Scope) => `${base}/api/skills/books/${job}/icon${scope(file)}`,
         /** Every mob in the library's Mob data with its stats, ordered by mob id. */
         mobs: (file?: Scope) => request<Mob[]>(`/api/mobs${scope(file)}`),
         /** Every mob with the maps it spawns in, ordered by mob id. */
@@ -320,7 +384,8 @@ export function createApi(base: string) {
         npcQuests: (file?: Scope) => request<NpcQuests[]>(`/api/npcs/quests${scope(file)}`),
         npcSpriteUrl: (id: number, file?: Scope) => `${base}/api/npcs/${id}/sprite${scope(file)}`,
         files: () => request<OpenedFile[]>("/api/files"),
-        open: (path: string, encryption: string) =>
+        /** `encryption` null (or empty) detects it. */
+        open: (path: string, encryption: string | null) =>
             request<OpenedFile>("/api/files", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -370,19 +435,32 @@ export function createApi(base: string) {
             }
             line(buffered);
         },
-        /** A Character file's menu: each directory at its root, and the root itself when it holds .imgs. */
+        /**
+         * A Character, Item or Skill file's menu: each directory at its root and the root itself when it holds .imgs,
+         * or a job's .img each.
+         */
         characterSections: (id: string) => request<CharacterSection[]>(`/api/files/${id}/character`),
-        /** One section's .imgs with String's names; `stringFileId` is the String file those came from. */
+        /** One section's items with String's names. */
         characterItems: (id: string, section: string) =>
-            request<{ items: CharacterItem[]; stringFileId: string | null }>(`/api/files/${id}/character/items?section=${q(section)}`),
-        /** An item's picture (its icon, else its first picture); 404 when it has none. `revision` busts the browser's cache after edits. */
+            request<CharacterItems>(`/api/files/${id}/character/items?section=${q(section)}`),
+        /**
+         * An item's picture (its icon, else its first picture); 404 when it has none. `revision` busts the browser's
+         * cache after edits.
+         */
         characterPictureUrl: (id: string, path: string, revision?: number) =>
             `${base}/api/files/${id}/character/picture?path=${q(path)}${revision != null ? `&v=${revision}` : ""}`,
-        /** An item's info node (stats, price, requirements, ...) with everything below it; undefined when it has none. */
-        characterInfo: (id: string, path: string) => request<PropTree | undefined>(`/api/files/${id}/character/info?path=${q(path)}`),
-        /** Sets an item's name and description in String's Eqp.img (adding its entry when missing); String is then listed as open. */
-        setCharacterStrings: (id: string, body: { id: number; section: string; name: string; desc: string }) =>
-            request<{ file: OpenedFile; path: string; name: string | null; desc: string | null }>(`/api/files/${id}/character/strings`, {
+        /**
+         * An item's info node (stats, price, requirements, ...) with everything below it, or a skill's whole node;
+         * undefined when it has none.
+         */
+        characterInfo: (id: string, path: string) =>
+            request<PropTree | undefined>(`/api/files/${id}/character/info?path=${q(path)}`),
+        /**
+         * Sets an item's name, description and other text in String (adding its entry and any value when missing);
+         * String is then listed as open.
+         */
+        setCharacterStrings: (id: string, body: CharacterStringsRequest) =>
+            request<CharacterStringsResult>(`/api/files/${id}/character/strings`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(body),

@@ -1,5 +1,3 @@
-using MapleLib.WzLib;
-
 namespace WzBrowser.Api;
 
 /// <summary>A mob's stats from its info node in Mob data; anything the mob doesn't set is 0.</summary>

@@ -3,6 +3,7 @@ import type { CategoryResult, CategorySub, CategoryTable } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { useActions } from "../lib/workspace";
 import { Pencil, Plus, XMark } from "./icons";
+import { errorMessage } from "../lib/errors";
 
 const IMG = "Category.img";
 const COMMODITY_IMG = "Commodity.img";
@@ -22,7 +23,19 @@ export type TabFilter = null | { category: number; sub?: number } | "other";
  * SNs fall in each. Clicking one filters the table. Sub tabs can be added, renamed and deleted; categories are fixed
  * by the client, so they can't.
  */
-export const CategorySidebar = memo(function CategorySidebar({ width, fileId, revision, counts, total, other, unfiled, selected, onSelect, onTabs, onOpenRaw }: {
+export const CategorySidebar = memo(function CategorySidebar({
+    width,
+    fileId,
+    revision,
+    counts,
+    total,
+    other,
+    unfiled,
+    selected,
+    onSelect,
+    onTabs,
+    onOpenRaw,
+}: {
     width: number;
     fileId: string;
     revision: number;
@@ -55,7 +68,7 @@ export const CategorySidebar = memo(function CategorySidebar({ width, fileId, re
         let cancelled = false;
         api.categories(fileId).then(
             (t) => { if (!cancelled) { setTable(t); setError(null); } },
-            (e) => { if (!cancelled) { setTable(null); setError(e instanceof Error ? e.message : String(e)); } },
+            (e) => { if (!cancelled) { setTable(null); setError(errorMessage(e)); } },
         );
         return () => { cancelled = true; };
     }, [api, status, fileId, revision]);
@@ -74,7 +87,7 @@ export const CategorySidebar = memo(function CategorySidebar({ width, fileId, re
             done?.(r);
             return true;
         } catch (e) {
-            actions.toast("error", e instanceof Error ? e.message : String(e));
+            actions.toast("error", errorMessage(e));
             return false;
         }
     };
@@ -119,7 +132,11 @@ export const CategorySidebar = memo(function CategorySidebar({ width, fileId, re
         !!selected && selected !== "other" && selected.category === category && selected.sub === sub;
 
     return (
-        <nav aria-label="Cash Shop tabs" style={{ width }} className="flex shrink-0 flex-col overflow-y-auto border-r border-zinc-100 py-2 text-[13px] dark:border-zinc-800">
+        <nav
+            aria-label="Cash Shop tabs"
+            style={{ width }}
+            className="flex shrink-0 flex-col overflow-y-auto border-r border-zinc-100 py-2 text-[13px] dark:border-zinc-800"
+        >
             <Row label="All entries" count={total} active={selected === null} onClick={() => onSelect(null)} strong />
             {error && <p role="alert" className="px-3 py-2 text-xs text-rose-600 dark:text-rose-400">{error}</p>}
             {!table && !error && <div className="space-y-1.5 px-3 py-2">{Array.from({ length: 8 }, (_, i) => <div key={i} className="skeleton h-6 rounded bg-zinc-100 dark:bg-zinc-800" />)}</div>}

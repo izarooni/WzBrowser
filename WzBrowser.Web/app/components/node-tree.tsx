@@ -11,6 +11,7 @@ import { copyText } from "../lib/copy-text";
 import { ContextMenu, type MenuItem } from "./context-menu";
 import { NewPropertyDialog } from "./new-property-dialog";
 import { PaneResizer, paneVar, usePaneWidth, type PaneWidth } from "./pane-resizer";
+import { errorMessage } from "../lib/errors";
 
 type Level =
     | { status: "loading" }
@@ -101,7 +102,7 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
         });
         api.children(fileId, path).then(
             (nodes) => setLevels((cur) => ({ ...cur, [path]: { status: "ready", nodes } })),
-            (e) => setLevels((cur) => ({ ...cur, [path]: { status: "error", message: e instanceof Error ? e.message : String(e) } })),
+            (e) => setLevels((cur) => ({ ...cur, [path]: { status: "error", message: errorMessage(e) } })),
         );
     }, [api, fileId]);
 
@@ -378,7 +379,7 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
         const name = path ? baseName(path) : file?.name ?? "file";
         ws.toast("info", `Exporting the images in “${name}”…`);
         try { await download(api.pngsUrl(fileId, path), `${name.replace(/\.(img|wz)$/i, "").replace(/[\\/:*?"<>|]/g, "_") || "images"}.zip`); }
-        catch (e) { ws.toast("error", `Couldn't export the images in “${name}”: ${e instanceof Error ? e.message : String(e)}`); }
+        catch (e) { ws.toast("error", `Couldn't export the images in “${name}”: ${errorMessage(e)}`); }
     };
 
     const importZip = (path: string) => {
@@ -388,7 +389,7 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
 
     const saveCanvas = async (path: string) => {
         try { await download(api.pngUrl(fileId, path, file?.revision), imageFileName(path)); }
-        catch (e) { ws.toast("error", e instanceof Error ? e.message : String(e)); }
+        catch (e) { ws.toast("error", errorMessage(e)); }
     };
 
     /** Where a new property goes from `path`: the node itself if it can hold properties, else its parent. */
@@ -718,7 +719,8 @@ function Detail({ pane, fileId, path, node, fileName, childCount, canPasteHere, 
     useEffect(() => { setZoom(1); setImgFailed(false); setCopied(false); setDropping(false); }, [path]);
     useEffect(() => { setImgFailed(false); }, [revision]);
 
-    const shell = "max-h-[42%] shrink-0 overflow-auto border-t border-zinc-100 @xl:max-h-none @xl:w-(--pane-w) @xl:border-l @xl:border-t-0 dark:border-zinc-800";
+    const shell = "max-h-[42%] shrink-0 overflow-auto border-t border-zinc-100 dark:border-zinc-800"
+        + " @xl:max-h-none @xl:w-(--pane-w) @xl:border-l @xl:border-t-0";
 
     if (path == null || !node) {
         return (
@@ -737,7 +739,7 @@ function Detail({ pane, fileId, path, node, fileName, childCount, canPasteHere, 
         try {
             await download(api.pngUrl(fileId, path, revision), imageFileName(path));
         } catch (e) {
-            ws.toast("error", e instanceof Error ? e.message : String(e));
+            ws.toast("error", errorMessage(e));
         } finally { setBusy(false); }
     };
     const replaceImage = async (image: File | undefined) => {
@@ -979,7 +981,7 @@ function ObjPreview({ fileId, path }: { fileId: string; path: string }) {
         let live = true;
         api.objRef(fileId, path).then(
             (ref) => { if (live) setState(ref ? { status: "ready", ref } : { status: "none" }); },
-            (e) => { if (live) setState({ status: "error", message: e instanceof Error ? e.message : String(e) }); },
+            (e) => { if (live) setState({ status: "error", message: errorMessage(e) }); },
         );
         return () => { live = false; };
     }, [api, fileId, path]);

@@ -67,7 +67,11 @@ public sealed class NameIndex : IDisposable
             {
                 var version = WzTool.DetectMapleVersion(path, out var gameVersion);
                 var file = new WzFile(path, gameVersion, version);
-                if (file.ParseWzFile() == WzFileParseStatus.Success) _files.Add(file);
+                if (file.ParseWzFile() == WzFileParseStatus.Success)
+                {
+                    _files.Add(file);
+                    ReadLog.Record(path);
+                }
                 else file.Dispose();
             }
             catch

@@ -48,6 +48,7 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(policy => policy
         (Uri.TryCreate(origin, UriKind.Absolute, out var u) && (u.IsLoopback || u.Host == "localhost")))
     .AllowAnyHeader()
     .AllowAnyMethod()
+    .WithExposedHeaders(ReadLog.Header)
     .SetPreflightMaxAge(TimeSpan.FromMinutes(10))));
 
 var app = builder.Build();
@@ -82,6 +83,9 @@ app.Use(async (ctx, next) =>
 });
 
 app.UseCors();
+
+// Tells the web app which other files each request read, so it can open a window for each.
+app.Use(ReportReads);
 
 // With --read-only, everyone (this computer too) may look but not touch: nothing is edited, saved or converted. Opening
 // files and following links only add files to the shared list, so they're allowed. MCP is all POSTs, so it passes here
@@ -121,34 +125,52 @@ var api = app.MapGroup("/api");
 // `library` tells the web app this server is pinned to a folder: it then lists /library instead of browsing /fs,
 // and keeps its API address fixed. `readOnly`: the server runs with --read-only, so everyone may only view.
 // `browseOnly`: a read only library, so only files with a view or table of their own are offered, and only through those.
-api.MapGet("/health", (WzService wz, HttpContext ctx) =>
-    new { status = "ok", port, version = "1.0.0", library = wz.Root != null, readOnly, browseOnly, skills = wz.HasSkills, mobs = wz.HasMobs, mobLocations = wz.HasMobLocations, maps = wz.HasMaps, items = wz.HasItems, npcs = wz.HasNpcQuests });
+api.MapGet("/health", (WzService wz, HttpContext ctx) => new
+{
+    status = "ok",
+    port,
+    version = "1.0.0",
+    library = wz.Root != null,
+    readOnly,
+    browseOnly,
+    mobs = wz.HasMobs,
+    mobLocations = wz.HasMobLocations,
+    maps = wz.HasMaps,
+    items = wz.HasItems,
+    npcs = wz.HasNpcQuests,
+});
 
 // ---- the files a pinned server offers ----
-// The tables below read the pinned library; without one, `?file=` names an open file whose install they read instead.
 api.MapGet("/library", (WzService wz, HttpContext ctx) => wz.Library(browsableOnly: browseOnly));
-// Every job's skills across the library (Skill.wz or a Packs/Skill_*.ms pack, with String's names), and their icons.
-api.MapGet("/skills", (string? file, WzService wz) => wz.Tables(file).Skills());
-api.MapGet("/skills/{id:int}/icon", (int id, string? file, HttpContext ctx, WzService wz) => LibraryPng(wz.Tables(file).SkillIcon(id), ctx));
-api.MapGet("/skills/books/{job:int}/icon", (int job, string? file, HttpContext ctx, WzService wz) => LibraryPng(wz.Tables(file).SkillBookIcon(job), ctx));
+
+// ---- the library tables ----
+// Each reads the pinned library; without one, `?file=` names an open file whose install it reads instead.
 // Every mob in the library's Mob data with its stats (level, HP, EXP, attack, defence, ...) and String's name.
-api.MapGet("/mobs", (string? file, WzService wz) => wz.Tables(file).Mobs());
+MapTable("/mobs", tables => tables.Mobs());
 // Etc's MobLocation.img: each mob and the maps it spawns in, with names, the mob's sprite and the maps' minimaps.
-api.MapGet("/mobs/locations", (string? file, WzService wz) => wz.Tables(file).MobLocations());
-api.MapGet("/mobs/{id:int}/sprite", (int id, string? file, HttpContext ctx, WzService wz) => LibraryPng(wz.Tables(file).MobSprite(id), ctx));
+MapTable("/mobs/locations", tables => tables.MobLocations());
+MapTablePicture("/mobs/{id:int}/sprite", (tables, id) => tables.MobSprite(id));
 // Every map with the mobs and NPCs its life places (and the mobs Etc lists there), with names.
-api.MapGet("/maps", (string? file, WzService wz) => wz.Tables(file).Maps());
-api.MapGet("/maps/{id:int}/minimap", (int id, string? file, HttpContext ctx, WzService wz) => LibraryPng(wz.Tables(file).MapMinimap(id), ctx));
+MapTable("/maps", tables => tables.Maps());
+MapTablePicture("/maps/{id:int}/minimap", (tables, id) => tables.MapMinimap(id));
 // Every item in one inventory tab (equip, use, setup, etc, cash) with its stats, String's name and description, and its icon.
 api.MapGet("/items/{category}", (string category, string? file, WzService wz) => wz.Tables(file).Items(category));
-api.MapGet("/items/{id:int}/icon", (int id, string? file, HttpContext ctx, WzService wz) => LibraryPng(wz.Tables(file).ItemIcon(id), ctx));
+MapTablePicture("/items/{id:int}/icon", (tables, id) => tables.ItemIcon(id));
 // The NPCs the library's quests start and end at, with the quests, and each NPC's sprite.
-api.MapGet("/npcs/quests", (string? file, WzService wz) => wz.Tables(file).NpcQuests());
-api.MapGet("/npcs/{id:int}/sprite", (int id, string? file, HttpContext ctx, WzService wz) => LibraryPng(wz.Tables(file).NpcSprite(id), ctx));
-static IResult LibraryPng(byte[]? png, HttpContext ctx)
+MapTable("/npcs/quests", tables => tables.NpcQuests());
+MapTablePicture("/npcs/{id:int}/sprite", (tables, id) => tables.NpcSprite(id));
+
+void MapTable<T>(string pattern, Func<WzService, T> read) =>
+    api.MapGet(pattern, (string? file, WzService wz) => read(wz.Tables(file)));
+
+void MapTablePicture(string pattern, Func<WzService, int, byte[]?> render) =>
+    api.MapGet(pattern, (int id, string? file, HttpContext context, WzService wz) =>
+        LibraryPng(render(wz.Tables(file), id), context));
+
+static IResult LibraryPng(byte[]? png, HttpContext context)
 {
     if (png == null) return Results.NotFound();
-    ctx.Response.Headers.CacheControl = "private, max-age=300";
+    context.Response.Headers.CacheControl = "private, max-age=300";
     return Results.File(png, "image/png");
 }
 
@@ -259,8 +281,10 @@ api.MapGet("/files/{id}/gallery", async (string id, HttpContext ctx, WzService w
 api.MapGet("/files/{id}/character", (string id, WzService wz) => wz.CharacterSections(id));
 api.MapGet("/files/{id}/character/items", (string id, string? section, WzService wz) => wz.CharacterSectionItems(id, section));
 // Each item's picture and info are fetched on their own, so a section lists at once and pictures load as they scroll in.
-api.MapGet("/files/{id}/character/picture", (string id, string path, HttpContext ctx, WzService wz) =>
-    wz.CharacterPicture(id, path, ctx.RequestAborted) is { } png ? Results.File(png, "image/png") : Results.NotFound());
+api.MapGet("/files/{id}/character/picture", (string id, string path, HttpContext context, WzService wz) =>
+    wz.CharacterPicture(id, path, context.RequestAborted) is { } png
+        ? Results.File(png, "image/png")
+        : Results.NotFound());
 // 204 when the item has no info.
 api.MapGet("/files/{id}/character/info", (string id, string path, WzService wz) =>
     wz.CharacterInfo(id, path) is { } info ? Results.Ok(info) : Results.NoContent());
@@ -321,6 +345,21 @@ Console.WriteLine($"MCP server: http://{host}:{port}/mcp");
 if (wzService.Root != null) Console.WriteLine($"Serving only the .wz files in {wzService.Root}");
 if (readOnly) Console.WriteLine("Read only: files can be viewed but not changed");
 app.Run();
+
+// Reports the other files a request read (String.wz for names, ...), so the web app can open a window for each.
+static async Task ReportReads(HttpContext context, Func<Task> next)
+{
+    var reads = ReadLog.Begin();
+    context.Response.OnStarting(AddHeader);
+    await next();
+
+    Task AddHeader()
+    {
+        if (ReadLog.Format(reads) is { } value)
+            context.Response.Headers[ReadLog.Header] = value;
+        return Task.CompletedTask;
+    }
+}
 
 static int FindFreePort(string host, int preferred)
 {

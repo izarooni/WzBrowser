@@ -4,6 +4,7 @@ import type { FsListing, LibraryFile, XmlExportJob } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { EncryptionSelect, libraryLabels } from "./file-picker";
 import { ArrowUp, Check, Document, Folder, XMark } from "./icons";
+import { errorMessage } from "../lib/errors";
 
 const LAST_DIR_KEY = "wzbrowser.lastDir";
 const LAST_OUTPUT_KEY = "wzbrowser.xmlOutput";
@@ -48,7 +49,7 @@ export function XmlExportDialog({ open, onClose }: { open: boolean; onClose: () 
     useEffect(() => {
         if (!job || job.state !== "running") return;
         const timer = setTimeout(() => {
-            api.xmlExport(job.id).then(setJob).catch((e) => setError(e instanceof Error ? e.message : String(e)));
+            api.xmlExport(job.id).then(setJob).catch((e) => setError(errorMessage(e)));
         }, 500);
         return () => clearTimeout(timer);
     }, [api, job]);
@@ -72,7 +73,7 @@ export function XmlExportDialog({ open, onClose }: { open: boolean; onClose: () 
             setJob(await api.startXmlExport([...selected], out, encryption));
             write(LAST_OUTPUT_KEY, out);
         } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
+            setError(errorMessage(e));
         } finally {
             setStarting(false);
         }
@@ -80,7 +81,7 @@ export function XmlExportDialog({ open, onClose }: { open: boolean; onClose: () 
 
     const cancel = async () => {
         if (!job) return;
-        try { setJob(await api.cancelXmlExport(job.id)); } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+        try { setJob(await api.cancelXmlExport(job.id)); } catch (e) { setError(errorMessage(e)); }
     };
 
     return (
@@ -216,7 +217,7 @@ function FolderSource({ open, selected, toggle, suggestOutput }: SourceProps) {
             suggestOutput(l.path);
             return true;
         } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
+            setError(errorMessage(e));
             return false;
         }
     }, [api, suggestOutput]);
@@ -297,7 +298,7 @@ function LibrarySource({ open, selected, toggle, suggestOutput }: SourceProps) {
                 const f = list[0];
                 if (f) suggestOutput(f.path.slice(0, f.path.length - f.name.length).replace(/[\\/]+$/, ""));
             })
-            .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); });
+            .catch((e) => { if (!cancelled) setError(errorMessage(e)); });
         return () => { cancelled = true; };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open, api]);

@@ -1,8 +1,9 @@
-import { memo, useEffect, useRef, useState, type RefObject } from "react";
+import { memo, useEffect, useRef, useState, type ReactNode, type RefObject, type SyntheticEvent } from "react";
 import type { GalleryItem } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { useQueuedImage } from "../lib/image-queue";
 import { Photo } from "./icons";
+import { errorMessage } from "../lib/errors";
 
 /** Thumbnail sizes, like Explorer's View menu. */
 export const SIZES = { small: 32, medium: 64, large: 128, xl: 256 } as const;
@@ -72,7 +73,7 @@ export const CanvasGallery = memo(function CanvasGallery({ fileId, revision, onO
             }));
             setError(null);
         }, aborter.signal).catch((e) => {
-            if (!aborter.signal.aborted) setError(e instanceof Error ? e.message : String(e));
+            if (!aborter.signal.aborted) setError(errorMessage(e));
         });
         return () => aborter.abort();
     }, [api, status, fileId, revision]);
@@ -136,9 +137,33 @@ export function Thumbnail({ item, box, url, selected, onSelect, onOpen }: {
     if (src) lastSrc.current = src;
     const shown = src ?? (item.frames ? lastSrc.current : null);
 
-    // Pictures smaller than the box are scaled up with hard pixel edges, like the game draws them; bigger ones shrink to fit.
-    const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
-    const upscaled = natural != null && natural.w < box && natural.h < box;
+    // Pictures smaller than the box are scaled up with hard pixel edges, like the game draws them; bigger ones shrink
+    // to fit.
+    const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
+    const upscaled = natural != null && natural.width < box && natural.height < box;
+
+    function measure(event: SyntheticEvent<HTMLImageElement>) {
+        const image = event.currentTarget;
+        setNatural({ width: image.naturalWidth, height: image.naturalHeight });
+    }
+
+    let content: ReactNode;
+    if (shown) {
+        content = (
+            <img
+                src={shown}
+                alt=""
+                draggable={false}
+                onLoad={measure}
+                className="min-h-0 min-w-0 max-h-full max-w-full object-contain"
+                style={upscaled ? { width: "100%", height: "100%", imageRendering: "pixelated" } : undefined}
+            />
+        );
+    } else if (failed) {
+        content = <Photo className="size-1/2 max-h-8 max-w-8 text-zinc-300 dark:text-zinc-600" />;
+    } else {
+        content = <span className="skeleton size-1/2 max-h-8 max-w-8 rounded bg-zinc-100 dark:bg-zinc-800" />;
+    }
 
     return (
         <button
@@ -156,22 +181,13 @@ export function Thumbnail({ item, box, url, selected, onSelect, onOpen }: {
                     : "border-transparent hover:bg-zinc-100 dark:hover:bg-zinc-800/70"
             }`}
         >
-            {/* Fixed tracks: with auto ones the cell grows to the picture, so max-w/max-h-full wouldn't hold it in the box. */}
-            <span className="grid shrink-0 place-items-center overflow-hidden" style={{ width: box, height: box, gridTemplate: `${box}px / ${box}px` }}>
-                {shown ? (
-                    <img
-                        src={shown}
-                        alt=""
-                        draggable={false}
-                        onLoad={(e) => setNatural({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
-                        className="min-h-0 min-w-0 max-h-full max-w-full object-contain"
-                        style={upscaled ? { width: "100%", height: "100%", imageRendering: "pixelated" } : undefined}
-                    />
-                ) : failed ? (
-                    <Photo className="size-1/2 max-h-8 max-w-8 text-zinc-300 dark:text-zinc-600" />
-                ) : (
-                    <span className="skeleton size-1/2 max-h-8 max-w-8 rounded bg-zinc-100 dark:bg-zinc-800" />
-                )}
+            {/* Fixed tracks: with auto ones the cell grows to the picture, so max-w/max-h-full wouldn't hold it in
+                the box. */}
+            <span
+                className="grid shrink-0 place-items-center overflow-hidden"
+                style={{ width: box, height: box, gridTemplate: `${box}px / ${box}px` }}
+            >
+                {content}
             </span>
             <span className={`line-clamp-2 w-full break-all text-xs leading-tight ${selected ? "text-accent-800 dark:text-accent-200" : "text-zinc-700 dark:text-zinc-300"}`}>
                 {item.label}

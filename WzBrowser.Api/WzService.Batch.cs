@@ -1,5 +1,4 @@
 using MapleLib.WzLib;
-using MapleLib.WzLib.WzProperties;
 
 namespace WzBrowser.Api;
 
@@ -214,7 +213,7 @@ public sealed partial class WzService
             var wasOpen = _files.ContainsKey(FileId(System.IO.Path.GetFullPath(f.Path)));
             try
             {
-                var file = Open(f.Path, null, hidden: true);
+                var file = Open(f.Path, null, hidden: true, report: false);
                 var hits = Search(file.Id, query, depth, limitPerFile);
                 if (hits.Count == 0 && !wasOpen) Close(file.Id);
                 else if (hits.Count > 0) results.Add(new FileSearchResult(f.Name, file.Id, hits, hits.Count >= limitPerFile, null));

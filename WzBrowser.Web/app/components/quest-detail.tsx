@@ -7,6 +7,7 @@ import {
 import { useNames } from "../lib/use-names";
 import { Archive } from "./icons";
 import { RefCtx, RefIcon, RefLink } from "./ref-link";
+import { errorMessage } from "../lib/errors";
 
 // ------------------------------------------------------------------ tree helpers
 
@@ -558,7 +559,7 @@ export const QuestSelectionView = memo(function QuestSelectionView({ fileId, rev
                     return { key, quests };
                 });
             },
-            (e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); },
+            (e) => { if (!cancelled) setError(errorMessage(e)); },
         );
         return () => { cancelled = true; };
     }, [api, fileId, key, questIds, known]);
@@ -615,7 +616,7 @@ export const QuestDetailView = memo(function QuestDetailView({ fileId, revision,
         setError(null);
         api.quest(fileId, questId).then(
             (d) => { if (!cancelled) setDetail(d); },
-            (e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); },
+            (e) => { if (!cancelled) setError(errorMessage(e)); },
         );
         return () => { cancelled = true; };
     }, [api, fileId, questId, revision]);

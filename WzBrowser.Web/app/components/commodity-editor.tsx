@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import type { CategoryTable, CommodityCell, CommodityColumn, CommodityRow, CommodityRowResult, CommodityRowsResult, CommodityTable, OpenedFile } from "../lib/api";
 import { useConnection } from "../lib/connection";
+import { errorMessage } from "../lib/errors";
 import { useNames } from "../lib/use-names";
 import { EDITABLE, INTEGER, invalid } from "../lib/values";
 import { useActions } from "../lib/workspace";
@@ -83,7 +84,7 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
                 });
                 setError(null);
             },
-            (e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); },
+            (e) => { if (!cancelled) setError(errorMessage(e)); },
         );
         return () => { cancelled = true; };
     }, [api, status, fileId, revision]);
@@ -268,7 +269,7 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
             if (rows.length > 1 || notes.length)
                 actions.toast("success", `Set ${column.name} to ${value}${rows.length > 1 ? ` on ${rows.length.toLocaleString()} entries` : ""}${notes.length ? `; ${notes.join(", ")}` : ""}.`);
         } catch (e) {
-            actions.toast("error", e instanceof Error ? e.message : String(e));
+            actions.toast("error", errorMessage(e));
         } finally {
             setPending((p) => { const n = new Set(p); tags.forEach((t) => n.delete(t)); return n; });
         }
@@ -358,7 +359,7 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
             await reload(r.file, [IMG, PACKAGE_IMG]);
             actions.toast("success", `Deleted ${r.deleted === 1 ? "1 entry" : `${r.deleted.toLocaleString()} entries`}${r.packageRefs ? ` and ${r.packageRefs.toLocaleString()} package ${r.packageRefs === 1 ? "content" : "contents"}` : ""}.`);
         } catch (e) {
-            actions.toast("error", e instanceof Error ? e.message : String(e));
+            actions.toast("error", errorMessage(e));
         }
     };
 
@@ -414,7 +415,7 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
                 const sn = r.row.cells[r.columns.findIndex((c) => c.name.toLowerCase() === "sn")]?.value;
                 if (sn) sns.push(sn);
             } catch (err) {
-                failure = `Item ${itemId}: ${err instanceof Error ? err.message : String(err)}`;
+                failure = `Item ${itemId}: ${errorMessage(err)}`;
                 break;
             }
         }
@@ -443,7 +444,7 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
                 actions.toast("error", failure);
             }
         } catch (err) {
-            actions.toast("error", err instanceof Error ? err.message : String(err));
+            actions.toast("error", errorMessage(err));
         } finally {
             setBusy(false);
         }
@@ -483,12 +484,27 @@ export const CommodityEditor = memo(function CommodityEditor({ fileId, revision,
         />
     );
 
+    function selectTab(tab: TabFilter) {
+        setTabFilter(tab);
+        if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    }
+
     return (
         <RefCtx.Provider value={ref}>
             <div className="flex min-h-0 flex-1">
-            <CategorySidebar width={tabsPane.width} fileId={fileId} revision={revision} counts={counts} total={table?.rows.length ?? null} other={otherCount} unfiled={unfiledCount}
-                selected={tabFilter} onTabs={setTabs} onOpenRaw={onOpenRaw}
-                onSelect={(f) => { setTabFilter(f); if (scrollRef.current) scrollRef.current.scrollTop = 0; }} />
+            <CategorySidebar
+                width={tabsPane.width}
+                fileId={fileId}
+                revision={revision}
+                counts={counts}
+                total={table?.rows.length ?? null}
+                other={otherCount}
+                unfiled={unfiledCount}
+                selected={tabFilter}
+                onTabs={setTabs}
+                onOpenRaw={onOpenRaw}
+                onSelect={selectTab}
+            />
             <PaneResizer pane={tabsPane} side="left" label="Resize the Cash Shop tabs" />
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 <div className="flex flex-wrap items-center gap-3 border-b border-zinc-100 p-3 dark:border-zinc-800">

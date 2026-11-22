@@ -1,5 +1,4 @@
 using MapleLib.WzLib;
-using MapleLib.WzLib.WzProperties;
 
 namespace WzBrowser.Api;
 

@@ -9,83 +9,103 @@ import { useEffect, useState, type RefObject } from "react";
 
 /** Pictures loading at once; the browser's other connections to the server stay free for lists and edits. */
 const MAX_RUNNING = 4;
-/** Loaded pictures kept, as object URLs by address, oldest first. */
+/** Loaded pictures kept. */
 const CACHE_MAX = 4000;
 
+interface Job {
+    url: string;
+    signal: AbortSignal;
+    resolve: (objectUrl: string) => void;
+    reject: (reason: unknown) => void;
+}
+
+/** Loaded pictures as object URLs, by address, oldest first. */
 const cache = new Map<string, string>();
-interface Job { url: string; signal: AbortSignal; resolve: (src: string) => void; reject: (e: unknown) => void }
 const waiting: Job[] = [];
 let running = 0;
 
-function remember(url: string, src: string) {
-    cache.set(url, src);
+function remember(url: string, objectUrl: string) {
+    cache.set(url, objectUrl);
     while (cache.size > CACHE_MAX) {
-        const [oldest, old] = cache.entries().next().value as [string, string];
-        cache.delete(oldest);
-        URL.revokeObjectURL(old);
+        const [oldestUrl, oldestObjectUrl] = cache.entries().next().value as [string, string];
+        cache.delete(oldestUrl);
+        URL.revokeObjectURL(oldestObjectUrl);
     }
 }
 
-function next() {
+async function fetchPicture(job: Job) {
+    const response = await fetch(job.url, { signal: job.signal });
+    if (!response.ok) throw new Error(`${response.status}`);
+    const objectUrl = URL.createObjectURL(await response.blob());
+    remember(job.url, objectUrl);
+    return objectUrl;
+}
+
+function startWaiting() {
     while (running < MAX_RUNNING && waiting.length > 0) {
         const job = waiting.shift()!;
         if (job.signal.aborted) continue;
         running++;
-        fetch(job.url, { signal: job.signal })
-            .then(async (res) => {
-                if (!res.ok) throw new Error(`${res.status}`);
-                const src = URL.createObjectURL(await res.blob());
-                remember(job.url, src);
-                job.resolve(src);
-            })
-            .catch(job.reject)
-            .finally(() => { running--; next(); });
+        fetchPicture(job).then(job.resolve, job.reject).finally(finishJob);
     }
+}
+
+function finishJob() {
+    running--;
+    startWaiting();
 }
 
 function load(url: string, signal: AbortSignal): Promise<string> {
     const hit = cache.get(url);
     if (hit) return Promise.resolve(hit);
-    return new Promise((resolve, reject) => {
-        waiting.push({ url, signal, resolve, reject });
-        signal.addEventListener("abort", () => {
-            const i = waiting.findIndex((j) => j.signal === signal);
-            if (i >= 0) waiting.splice(i, 1);
+    return new Promise(function queue(resolve, reject) {
+        const job: Job = { url, signal, resolve, reject };
+        waiting.push(job);
+        signal.addEventListener("abort", function dropJob() {
+            const index = waiting.indexOf(job);
+            if (index >= 0) waiting.splice(index, 1);
             reject(signal.reason);
         }, { once: true });
-        next();
+        startWaiting();
     });
 }
 
-/**
- * The picture at `url` for the element `ref`, loaded through the queue once the element is on screen (or near it).
- * `src` is null until it's loaded; `failed` when there's none (a 404) or it couldn't be read.
- */
-export function useQueuedImage(url: string | null, ref: RefObject<HTMLElement | null>): { src: string | null; failed: boolean } {
-    const [visible, setVisible] = useState(false);
-    const [state, setState] = useState<{ url: string; src: string | null; failed: boolean } | null>(null);
+export interface QueuedImage {
+    /** The loaded picture's object URL; null until it's loaded. */
+    src: string | null;
+    /** There's no picture (a 404) or it couldn't be read. */
+    failed: boolean;
+}
 
-    useEffect(() => {
-        const el = ref.current;
-        if (!el) return;
-        const observer = new IntersectionObserver(([e]) => setVisible(e.isIntersecting), { rootMargin: "200px" });
-        observer.observe(el);
+/** The picture at `url` for the element `ref`, loaded through the queue once the element is on screen (or near it). */
+export function useQueuedImage(url: string | null, ref: RefObject<HTMLElement | null>): QueuedImage {
+    const [visible, setVisible] = useState(false);
+    const [loaded, setLoaded] = useState<QueuedImage & { url: string } | null>(null);
+
+    useEffect(function watchVisibility() {
+        const element = ref.current;
+        if (!element) return;
+        const showVisibility = ([entry]: IntersectionObserverEntry[]) => setVisible(entry.isIntersecting);
+        const observer = new IntersectionObserver(showVisibility, { rootMargin: "200px" });
+        observer.observe(element);
         return () => observer.disconnect();
     }, [ref]);
 
     const cached = url ? cache.get(url) : undefined;
-    useEffect(() => {
+    useEffect(function loadWhileVisible() {
         if (!url || cached || !visible) return;
+        const loading = url;
         const aborter = new AbortController();
-        load(url, aborter.signal).then(
-            (src) => setState({ url, src, failed: false }),
-            () => { if (!aborter.signal.aborted) setState({ url, src: null, failed: true }); },
-        );
+        const showLoaded = (src: string) => setLoaded({ url: loading, src, failed: false });
+        const showFailed = () => {
+            if (!aborter.signal.aborted) setLoaded({ url: loading, src: null, failed: true });
+        };
+        load(loading, aborter.signal).then(showLoaded, showFailed);
         return () => aborter.abort();
     }, [url, cached, visible]);
 
     if (!url) return { src: null, failed: true };
     if (cached) return { src: cached, failed: false };
-    if (state?.url === url) return { src: state.src, failed: state.failed };
+    if (loaded?.url === url) return { src: loaded.src, failed: loaded.failed };
     return { src: null, failed: false };
 }

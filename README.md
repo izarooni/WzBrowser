@@ -43,7 +43,7 @@ Without a root, the web app can browse your whole disk to open files. With a roo
 
 Without a root, those tables read the install the open file is in instead (its folder, or up to two folders up).
 
-Character.wz, Item.wz and Skill.wz open on a grid of thumbnails by section (a slot, an inventory tab, a job). Clicking one shows its properties, which can be edited in place, and String's name and description, which are saved to String.wz.
+Character.wz, Item.wz and Skill.wz open on a grid of thumbnails by section (a slot, an inventory tab, a job). Clicking one shows its properties, which can be edited in place, and String's name, description and other text (a skill's per-level descriptions: h, h1, h2, ...), which are saved to String.wz.
 
 With `--read-only` as well, only files with a view or table of their own can be opened, and only that view and table are shown: no raw tree.
 
@@ -86,7 +86,7 @@ The **Commodity** tab of `Etc.wz` shows the Cash Shop list as an editable table.
 
 ![Moving windows around the canvas](moveable_canvas.gif)
 
-Each opened file is a window on a canvas. Pan by dragging the background (or with the middle mouse button anywhere), and move, resize or collapse windows.
+Each opened file is a window on a canvas. Pan by dragging the background (or with the middle mouse button anywhere), and move, resize or collapse windows. When a view reads another file, such as String.wz for names or Npc.wz for an NPC, that file opens in its own window behind it (once per page load, so a window you close stays closed).
 
 ![Dragging nodes between files and deleting them](drag_drop_delete.gif)
 

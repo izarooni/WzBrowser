@@ -6,11 +6,18 @@ import { useScrollIntoView, type Focus } from "../lib/focus";
 import { npcId } from "../lib/game-ids";
 import { ChevronDown, ChevronRight, Search, XMark } from "./icons";
 import { MapCard } from "./mob-locations";
+import { errorMessage } from "../lib/errors";
 
 /** Rows rendered at a time; "Show more" adds another page. */
 const PAGE = 150;
 /** Quest names shown on a collapsed row before "+N more". */
 const PREVIEW_QUESTS = 6;
+
+const QUEST_BUTTON = [
+    "flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left text-[13px] transition",
+    "disabled:pointer-events-none hover:border-accent-400 hover:bg-accent-50/50",
+    "dark:hover:border-accent-500/60 dark:hover:bg-accent-600/10",
+].join(" ");
 
 /** Every NPC a quest starts or ends at: its sprite, the quests, each a link to that quest's page, and the maps it stands in. */
 export const NpcQuestTable = memo(function NpcQuestTable({ onOpenQuest, focus, onShowMap }: {
@@ -41,7 +48,7 @@ export const NpcQuestTable = memo(function NpcQuestTable({ onOpenQuest, focus, o
         let cancelled = false;
         api.npcQuests().then(
             (d) => { if (!cancelled) { setData(d); setError(null); } },
-            (e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); },
+            (e) => { if (!cancelled) setError(errorMessage(e)); },
         );
         return () => { cancelled = true; };
     }, [api, status, data]);
@@ -199,7 +206,7 @@ export const NpcQuestTable = memo(function NpcQuestTable({ onOpenQuest, focus, o
                                                         onClick={() => onOpenQuest?.(q.archive, q.id)}
                                                         disabled={!onOpenQuest}
                                                         title={onOpenQuest ? "Show this quest" : undefined}
-                                                        className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left text-[13px] transition disabled:pointer-events-none hover:border-accent-400 hover:bg-accent-50/50 dark:hover:border-accent-500/60 dark:hover:bg-accent-600/10 ${hits?.has(q)
+                                                        className={`${QUEST_BUTTON} ${hits?.has(q)
                                                             ? "border-accent-400 dark:border-accent-500/60"
                                                             : "border-zinc-200 dark:border-zinc-800"}`}
                                                     >

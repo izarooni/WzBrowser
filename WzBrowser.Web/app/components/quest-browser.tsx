@@ -5,6 +5,7 @@ import { useActions } from "../lib/workspace";
 import { Search, XMark } from "./icons";
 import { PaneResizer, paneVar, usePaneWidth } from "./pane-resizer";
 import { QuestDetailView, QuestSelectionView } from "./quest-detail";
+import { errorMessage } from "../lib/errors";
 
 const ROW_H = 40;
 const OVERSCAN = 8;
@@ -53,7 +54,7 @@ export const QuestBrowser = memo(function QuestBrowser({ fileId, revision, onOpe
         let cancelled = false;
         api.quests(fileId).then(
             (list) => { if (!cancelled) { setQuests(list); setError(null); } },
-            (e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); },
+            (e) => { if (!cancelled) setError(errorMessage(e)); },
         );
         return () => { cancelled = true; };
     }, [api, status, fileId, revision]);
@@ -162,7 +163,11 @@ export const QuestBrowser = memo(function QuestBrowser({ fileId, revision, onOpe
     return (
         <div className="@container flex min-h-0 flex-1 flex-col">
             <div className="flex min-h-0 flex-1 flex-col @xl:flex-row">
-                <div style={paneVar(listPane)} className="flex max-h-[45%] min-h-0 shrink-0 flex-col border-b border-zinc-100 @xl:max-h-none @xl:w-(--pane-w) @xl:border-b-0 @xl:border-r dark:border-zinc-800">
+                <div
+                    style={paneVar(listPane)}
+                    className={"flex max-h-[45%] min-h-0 shrink-0 flex-col border-b border-zinc-100 dark:border-zinc-800"
+                        + " @xl:max-h-none @xl:w-(--pane-w) @xl:border-b-0 @xl:border-r"}
+                >
                     <div className="border-b border-zinc-100 p-3 dark:border-zinc-800">
                         <label className="relative block">
                             <Search className="search-icon" />

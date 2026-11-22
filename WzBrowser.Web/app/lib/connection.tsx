@@ -1,5 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { createApi, DEFAULT_API_BASE, loadApiBase, loadDefaultApiBase, normalizeBase, saveApiBase, type Api } from "./api";
+import {
+    createApi,
+    DEFAULT_API_BASE,
+    loadApiBase,
+    loadDefaultApiBase,
+    normalizeBase,
+    saveApiBase,
+    type Api,
+    type Health,
+} from "./api";
 
 export type ConnectionStatus = "checking" | "online" | "offline";
 
@@ -19,8 +28,6 @@ interface Connection {
     readOnly: boolean;
     /** A read only pinned server: only the quest and Commodity views, never the raw tree. */
     browseOnly: boolean;
-    /** The library has skill data to show (a pinned server only). */
-    skills: boolean;
     /** The library has Mob data to show (a pinned server only). */
     mobs: boolean;
     /** The library has Etc's MobLocation.img to show (a pinned server only). */
@@ -37,6 +44,21 @@ interface Connection {
 
 const Ctx = createContext<Connection | null>(null);
 
+/** What the library has data for, so its tables are worth showing (a pinned server only). */
+type LibraryData = Pick<Connection, "mobs" | "mobLocations" | "maps" | "items" | "npcs">;
+
+const NO_LIBRARY_DATA: LibraryData = { mobs: false, mobLocations: false, maps: false, items: false, npcs: false };
+
+function libraryDataOf(health: Health): LibraryData {
+    return {
+        mobs: !!health.mobs,
+        mobLocations: !!health.mobLocations,
+        maps: !!health.maps,
+        items: !!health.items,
+        npcs: !!health.npcs,
+    };
+}
+
 export function ConnectionProvider({ children }: { children: ReactNode }) {
     // Always start from the default so server-rendered and first-client markup agree; real value loads after mount.
     const [base, setBaseState] = useState(DEFAULT_API_BASE);
@@ -45,12 +67,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
     const [library, setLibrary] = useState(false);
     const [readOnly, setReadOnly] = useState(false);
     const [browseOnly, setBrowseOnly] = useState(false);
-    const [skills, setSkills] = useState(false);
-    const [mobs, setMobs] = useState(false);
-    const [mobLocations, setMobLocations] = useState(false);
-    const [maps, setMaps] = useState(false);
-    const [items, setItems] = useState(false);
-    const [npcs, setNpcs] = useState(false);
+    const [libraryData, setLibraryData] = useState(NO_LIBRARY_DATA);
     const [defaultBase, setDefaultBase] = useState(DEFAULT_API_BASE);
     const [ready, setReady] = useState(false);
     const [tick, setTick] = useState(0);
@@ -75,19 +92,14 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
         let timer: ReturnType<typeof setTimeout>;
         const poll = async () => {
             try {
-                const h = await api.health();
+                const health = await api.health();
                 if (cancelled) return;
                 setStatus("online");
-                setApiVersion(h.version);
-                setLibrary(!!h.library);
-                setReadOnly(!!h.readOnly);
-                setBrowseOnly(!!h.browseOnly);
-                setSkills(!!h.skills);
-                setMobs(!!h.mobs);
-                setMobLocations(!!h.mobLocations);
-                setMaps(!!h.maps);
-                setItems(!!h.items);
-                setNpcs(!!h.npcs);
+                setApiVersion(health.version);
+                setLibrary(!!health.library);
+                setReadOnly(!!health.readOnly);
+                setBrowseOnly(!!health.browseOnly);
+                setLibraryData(libraryDataOf(health));
             } catch {
                 if (cancelled) return;
                 setStatus("offline");
@@ -110,8 +122,20 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
     const recheck = useCallback(() => setTick((t) => t + 1), []);
 
     const value = useMemo(
-        () => ({ api, base, defaultBase, status, apiVersion, library, readOnly, browseOnly, skills, mobs, mobLocations, maps, items, npcs, setBase, recheck }),
-        [api, base, defaultBase, status, apiVersion, library, readOnly, browseOnly, skills, mobs, mobLocations, maps, items, npcs, setBase, recheck],
+        () => ({
+            api,
+            base,
+            defaultBase,
+            status,
+            apiVersion,
+            library,
+            readOnly,
+            browseOnly,
+            ...libraryData,
+            setBase,
+            recheck,
+        }),
+        [api, base, defaultBase, status, apiVersion, library, readOnly, browseOnly, libraryData, setBase, recheck],
     );
     return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

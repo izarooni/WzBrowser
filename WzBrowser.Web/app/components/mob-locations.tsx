@@ -5,6 +5,7 @@ import { useLibraryApi } from "../lib/library-api";
 import { useScrollIntoView, type Focus } from "../lib/focus";
 import { mapId, mobId, splitMapName } from "../lib/game-ids";
 import { ChevronDown, ChevronRight, Search, XMark } from "./icons";
+import { errorMessage } from "../lib/errors";
 
 /** Rows rendered at a time; "Show more" adds another page. */
 const PAGE = 150;
@@ -35,7 +36,7 @@ export const MobLocationTable = memo(function MobLocationTable({ focus, onShowMa
         let cancelled = false;
         api.mobLocations().then(
             (d) => { if (!cancelled) { setData(d); setError(null); } },
-            (e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); },
+            (e) => { if (!cancelled) setError(errorMessage(e)); },
         );
         return () => { cancelled = true; };
     }, [api, status, data]);

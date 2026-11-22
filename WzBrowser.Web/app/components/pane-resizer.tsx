@@ -1,36 +1,52 @@
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 
-const STORAGE = "wzbrowser.pane.";
+const STORAGE_PREFIX = "wzbrowser.pane.";
+/** How wide the row's middle stays while a pane is dragged wider. */
+const MIDDLE_MIN_WIDTH = 200;
 
 /** A side pane's width, remembered per pane (every window with that pane shares it). */
-export type PaneWidth = { width: number; setWidth: (w: number) => void; initial: number; min: number; max: number };
+export interface PaneWidth {
+    width: number;
+    setWidth: (width: number) => void;
+    initial: number;
+    min: number;
+    max: number;
+}
 
 export function usePaneWidth(key: string, initial: number, min: number, max: number): PaneWidth {
-    const [width, setWidthState] = useState(() => {
-        try {
-            const v = Number(localStorage.getItem(STORAGE + key));
-            if (v > 0) return clamp(v, min, max);
-        } catch { /* not persisted */ }
-        return initial;
-    });
-    const setWidth = (w: number) => setWidthState(clamp(Math.round(w), min, max));
+    const [width, setStoredWidth] = useState(() => readWidth(key, initial, min, max));
+    const setWidth = (next: number) => setStoredWidth(clamp(Math.round(next), min, max));
     // Written once the drag settles rather than on every move.
-    useEffect(() => {
-        const t = setTimeout(() => {
-            try {
-                if (width === initial) localStorage.removeItem(STORAGE + key);
-                else localStorage.setItem(STORAGE + key, String(width));
-            } catch { /* not persisted */ }
-        }, 250);
-        return () => clearTimeout(t);
+    useEffect(function rememberWidth() {
+        const timer = setTimeout(() => writeWidth(key, width, initial), 250);
+        return () => clearTimeout(timer);
     }, [key, width, initial]);
     return { width, setWidth, initial, min, max };
 }
 
-/** The width as a CSS variable, for panes that only take it at some container sizes (`@xl:w-(--pane-w)`). */
-export const paneVar = (pane: PaneWidth) => ({ "--pane-w": `${pane.width}px` }) as CSSProperties;
+function readWidth(key: string, initial: number, min: number, max: number) {
+    try {
+        const stored = Number(localStorage.getItem(STORAGE_PREFIX + key));
+        if (stored > 0) return clamp(stored, min, max);
+    } catch { /* not persisted */ }
+    return initial;
+}
 
-const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
+function writeWidth(key: string, width: number, initial: number) {
+    try {
+        if (width === initial) localStorage.removeItem(STORAGE_PREFIX + key);
+        else localStorage.setItem(STORAGE_PREFIX + key, String(width));
+    } catch { /* not persisted */ }
+}
+
+/** The width as a CSS variable, for panes that only take it at some container sizes (`@xl:w-(--pane-w)`). */
+export function paneVar(pane: PaneWidth) {
+    return { "--pane-w": `${pane.width}px` } as CSSProperties;
+}
+
+function clamp(value: number, min: number, max: number) {
+    return Math.min(max, Math.max(min, value));
+}
 
 /**
  * A draggable edge between a side pane and the rest, placed between them in the flex row. `side` is where the pane
@@ -44,32 +60,44 @@ export function PaneResizer({ pane, side, label, className = "" }: {
     className?: string;
 }) {
     const [dragging, setDragging] = useState(false);
-    const drag = useRef<{ x: number; width: number; room: number } | null>(null);
-    const sign = side === "left" ? 1 : -1;
+    const drag = useRef<{ startX: number; startWidth: number; maxWidth: number } | null>(null);
+    const direction = side === "left" ? 1 : -1;
 
-    const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
-        if (e.button !== 0) return;
-        e.preventDefault();
-        e.stopPropagation();
-        e.currentTarget.setPointerCapture(e.pointerId);
-        // Leave the middle at least 200px of the row.
-        const row = e.currentTarget.parentElement?.parentElement;
-        const room = row ? pane.width + Math.max(0, middleWidth(row, e.currentTarget.parentElement!) - 200) : pane.max;
-        drag.current = { x: e.clientX, width: pane.width, room };
+    function startDrag(event: PointerEvent<HTMLDivElement>) {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const handle = event.currentTarget;
+        handle.setPointerCapture(event.pointerId);
+        drag.current = { startX: event.clientX, startWidth: pane.width, maxWidth: widestAllowed(handle, pane) };
         setDragging(true);
-    };
-    const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
-        const d = drag.current;
-        if (!d) return;
-        pane.setWidth(Math.min(d.room, d.width + sign * (e.clientX - d.x)));
-    };
-    const end = () => { drag.current = null; setDragging(false); };
-    const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-        const step = e.shiftKey ? 64 : 16;
-        if (e.key === "ArrowLeft") { e.preventDefault(); pane.setWidth(pane.width - sign * step); }
-        else if (e.key === "ArrowRight") { e.preventDefault(); pane.setWidth(pane.width + sign * step); }
-        else if (e.key === "Home" || e.key === "Enter") { e.preventDefault(); pane.setWidth(pane.initial); }
-    };
+    }
+
+    function moveDrag(event: PointerEvent<HTMLDivElement>) {
+        const current = drag.current;
+        if (!current) return;
+        const width = current.startWidth + direction * (event.clientX - current.startX);
+        pane.setWidth(Math.min(current.maxWidth, width));
+    }
+
+    function endDrag() {
+        drag.current = null;
+        setDragging(false);
+    }
+
+    function resizeWithKeys(event: KeyboardEvent<HTMLDivElement>) {
+        const step = event.shiftKey ? 64 : 16;
+        let width: number;
+        if (event.key === "ArrowLeft") width = pane.width - direction * step;
+        else if (event.key === "ArrowRight") width = pane.width + direction * step;
+        else if (event.key === "Home" || event.key === "Enter") width = pane.initial;
+        else return;
+        event.preventDefault();
+        pane.setWidth(width);
+    }
+
+    const resetWidth = () => pane.setWidth(pane.initial);
+    const line = dragging ? "bg-accent-500" : "group-hover:bg-accent-400/70 group-focus-visible:bg-accent-500";
 
     return (
         <div className={`relative z-10 w-0 shrink-0 ${className}`}>
@@ -82,18 +110,16 @@ export function PaneResizer({ pane, side, label, className = "" }: {
                 aria-valuemax={pane.max}
                 tabIndex={0}
                 title="Drag to resize · double-click to reset"
-                onPointerDown={onPointerDown}
-                onPointerMove={onPointerMove}
-                onPointerUp={end}
-                onPointerCancel={end}
-                onLostPointerCapture={end}
-                onDoubleClick={() => pane.setWidth(pane.initial)}
-                onKeyDown={onKeyDown}
+                onPointerDown={startDrag}
+                onPointerMove={moveDrag}
+                onPointerUp={endDrag}
+                onPointerCancel={endDrag}
+                onLostPointerCapture={endDrag}
+                onDoubleClick={resetWidth}
+                onKeyDown={resizeWithKeys}
                 className="group absolute inset-y-0 -left-1.5 w-3 cursor-col-resize touch-none outline-none"
             >
-                <span className={`absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 transition-colors ${
-                    dragging ? "bg-accent-500" : "group-hover:bg-accent-400/70 group-focus-visible:bg-accent-500"
-                }`} />
+                <span className={`absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 transition-colors ${line}`} />
             </div>
             {/* Keeps the cursor and stops text selection while the pointer is off the edge. */}
             {dragging && <div className="fixed inset-0 z-[999] cursor-col-resize select-none" />}
@@ -101,12 +127,20 @@ export function PaneResizer({ pane, side, label, className = "" }: {
     );
 }
 
+/** The widest the pane may get: as wide as leaves the row's middle its minimum, and no wider than its max. */
+function widestAllowed(handle: HTMLElement, pane: PaneWidth) {
+    const wrapper = handle.parentElement;
+    const row = wrapper?.parentElement;
+    if (!wrapper || !row) return pane.max;
+    return pane.width + Math.max(0, middleWidth(row, wrapper) - MIDDLE_MIN_WIDTH);
+}
+
 /** The width of the row's flexible middle: the row less every other child, the handle's wrapper excluded. */
-function middleWidth(row: HTMLElement, handle: HTMLElement) {
+function middleWidth(row: HTMLElement, wrapper: HTMLElement) {
     let fixed = 0;
     let flexible = 0;
     for (const child of Array.from(row.children) as HTMLElement[]) {
-        if (child === handle) continue;
+        if (child === wrapper) continue;
         if (getComputedStyle(child).flexGrow !== "0") flexible += child.offsetWidth;
         else fixed += child.offsetWidth;
     }

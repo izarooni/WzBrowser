@@ -1,9 +1,11 @@
 import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from "@headlessui/react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { FilePicker } from "../components/file-picker";
-import type { LookupKind, NodeCreate, NodeEdit, OpenedFile, WzNode } from "./api";
+import { onFilesRead, type LookupKind, type NodeCreate, type NodeEdit, type OpenedFile, type WzNode } from "./api";
 import { useConnection } from "./connection";
+import { tableTopOf } from "./library-api";
 import { parentPath } from "./paths";
+import { errorMessage } from "./errors";
 
 // ------------------------------------------------------------------ windows
 
@@ -50,6 +52,11 @@ function reducer(s: State, a: Action): State {
                 wins: s.wins.map((w, i) => ({ ...w, x: 32 + (i % 10) * 36, y: 32 + (i % 10) * 36, collapsed: false })),
             };
     }
+}
+
+/** Where a window of `size` starts along one side of the canvas: centred, nudged by `cascade`, kept 16px inside. */
+function centred(size: number, canvasSize: number, cascade: number) {
+    return Math.max(16, Math.min((canvasSize - size) / 2 + cascade, canvasSize - size - 16));
 }
 
 function readLayouts(): { pan: { x: number; y: number }; wins: Record<string, Layout> } {
@@ -142,7 +149,6 @@ export const useLayout = () => need(useContext(LayoutCtx));
 export const useWorkspaceData = () => need(useContext(DataCtx));
 export const useActions = () => need(useContext(ActionsCtx));
 
-const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const { api, status } = useConnection();
@@ -231,26 +237,27 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }, []);
 
     const addWindow = useCallback((file: OpenedFile) => {
-        const s = stateRef.current;
+        const state = stateRef.current;
         const saved = layouts.current[file.id];
         // Quest archives show a list beside a detail pane, and Etc.wz and the files with a library table a wide table,
         // so they open bigger than a plain tree.
-        const plain = file.kind === "generic" && !["mob", "skill", "map", "item", "npc"].includes((file.top ?? "").toLowerCase());
-        let w = plain ? 680 : 980;
-        let h = plain ? 560 : 620;
-        if (saved) { w = saved.w; h = saved.h; }
+        const plain = file.kind === "generic" && !tableTopOf(file);
         // Open in the middle of the visible canvas, whatever the pan, so a new window never lands off screen.
         // A remembered size is kept but not a remembered position. Each open window nudges the next one down
         // and right so several opened in a row don't stack exactly.
-        const rect = document.querySelector("[data-canvas]")?.getBoundingClientRect();
-        const vw = rect?.width ?? window.innerWidth;
-        const vh = rect?.height ?? window.innerHeight;
-        w = Math.max(320, Math.min(w, vw - 32));
-        h = Math.max(200, Math.min(h, vh - 32));
-        const n = s.wins.length % 6;
-        const sx = Math.max(16, Math.min((vw - w) / 2 + n * 28, vw - w - 16));
-        const sy = Math.max(16, Math.min((vh - h) / 2 + n * 28, vh - h - 16));
-        const layout = { x: Math.round(sx - s.pan.x), y: Math.round(sy - s.pan.y), w, h, collapsed: false };
+        const canvas = document.querySelector("[data-canvas]")?.getBoundingClientRect();
+        const canvasWidth = canvas?.width ?? window.innerWidth;
+        const canvasHeight = canvas?.height ?? window.innerHeight;
+        const width = Math.max(320, Math.min(saved?.w ?? (plain ? 680 : 980), canvasWidth - 32));
+        const height = Math.max(200, Math.min(saved?.h ?? (plain ? 560 : 620), canvasHeight - 32));
+        const cascade = (state.wins.length % 6) * 28;
+        const layout = {
+            x: Math.round(centred(width, canvasWidth, cascade) - state.pan.x),
+            y: Math.round(centred(height, canvasHeight, cascade) - state.pan.y),
+            w: width,
+            h: height,
+            collapsed: false,
+        };
         dispatch({ type: "add", fileId: file.id, layout });
     }, []);
 
@@ -267,6 +274,47 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         return () => { cancelled = true; };
     }, [api, status]);
 
+    // A file read on behalf of an open one (String.wz for names, Npc.wz for an NPC, ...) gets a window of its own,
+    // opened behind the one in front. Once per page load: closing it means the next lookup doesn't bring it back.
+    const autoOpened = useRef(new Set<string>());
+    useEffect(function openFilesRead() {
+        if (status !== "online") return;
+
+        const hasWindow = (fileId: string) => stateRef.current.wins.some((win) => win.fileId === fileId);
+
+        function frontWindow() {
+            let front: Win | null = null;
+            for (const win of stateRef.current.wins)
+                if (!front || win.z > front.z) front = win;
+            return front;
+        }
+
+        function openBehind(file: OpenedFile) {
+            if (hasWindow(file.id)) return;
+            const front = frontWindow();
+            upsert(file);
+            addWindow(file);
+            if (front) dispatch({ type: "focus", id: front.fileId });
+        }
+
+        function skipUnopenable() {
+            // A browse-only server only opens files with a view of their own: the others get no window.
+        }
+
+        function openRead(paths: string[]) {
+            for (const path of paths) {
+                const key = path.toLowerCase();
+                if (autoOpened.current.has(key)) continue;
+                autoOpened.current.add(key);
+                const known = Object.values(filesRef.current).find((file) => file.path.toLowerCase() === key);
+                if (known && hasWindow(known.id)) continue;
+                api.open(path, null).then(openBehind, skipUnopenable);
+            }
+        }
+
+        return onFilesRead(openRead);
+    }, [api, status, upsert, addWindow]);
+
     const openFile = useCallback((file: OpenedFile) => {
         upsert(file);
         if (stateRef.current.wins.some((w) => w.fileId === file.id)) dispatch({ type: "focus", id: file.id });
@@ -282,7 +330,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             // The window may have just been created; wait a frame so it exists before measuring it.
             requestAnimationFrame(() => showWindow(r.file.id));
         } catch (e) {
-            toast("error", errText(e));
+            toast("error", errorMessage(e));
         }
     }, [api, upsert, openFile, reveal, showWindow, toast]);
 
@@ -325,8 +373,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 }
             } catch (e) {
                 // With several nodes, say which one failed.
-                if (list.length > 1) toast("error", `“${item.name}”: ${errText(e)}`);
-                else toast("error", errText(e));
+                if (list.length > 1) toast("error", `“${item.name}”: ${errorMessage(e)}`);
+                else toast("error", errorMessage(e));
             }
         }
         if (!done) return;
@@ -362,7 +410,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             }
             return true;
         } catch (e) {
-            toast("error", errText(e));
+            toast("error", errorMessage(e));
             return false;
         }
     }, [api, confirm, upsert, emit, openFile, toast]);
@@ -374,7 +422,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             emit(fileId, { reload: [parentPath(path)], reveal: r.path });
             return true;
         } catch (e) {
-            toast("error", errText(e));
+            toast("error", errorMessage(e));
             return false;
         }
     }, [api, upsert, emit, toast]);
@@ -386,7 +434,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             emit(fileId, { reload: [parent], reveal: r.path });
             return true;
         } catch (e) {
-            toast("error", errText(e));
+            toast("error", errorMessage(e));
             return false;
         }
     }, [api, upsert, emit, toast]);
@@ -398,7 +446,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             emit(fileId, { reload: [parentPath(path), path], reveal: r.path });
             return true;
         } catch (e) {
-            toast("error", errText(e));
+            toast("error", errorMessage(e));
             return false;
         }
     }, [api, upsert, emit, toast]);
@@ -416,7 +464,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             else toast(r.images + r.properties + r.created ? "info" : "error",
                 `Imported “${zip.name}”: ${done}. Skipped: ${r.warnings.slice(0, 3).join(" ")}${r.warnings.length > 3 ? ` …and ${r.warnings.length - 3} more.` : ""}`);
         } catch (e) {
-            toast("error", errText(e));
+            toast("error", errorMessage(e));
         }
     }, [api, upsert, emit, toast]);
 
@@ -426,7 +474,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             upsert(r.file);
             toast("success", `Saved a new file: ${r.path} (${(r.size / 1048576).toFixed(1)} MB). The original is untouched.`);
         } catch (e) {
-            toast("error", errText(e));
+            toast("error", errorMessage(e));
         }
     }, [api, upsert, toast]);
 
@@ -442,7 +490,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             upsert(await api.revert(fileId));
             emit(fileId, { reset: true });
         } catch (e) {
-            toast("error", errText(e));
+            toast("error", errorMessage(e));
         }
     }, [api, confirm, upsert, emit, toast]);
 
