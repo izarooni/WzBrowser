@@ -2,9 +2,7 @@ import {
     memo,
     useEffect,
     useMemo,
-    useRef,
     useState,
-    type FormEvent,
     type MouseEvent,
     type ReactNode,
     type SyntheticEvent,
@@ -101,8 +99,6 @@ export const CharacterBrowser = memo(function CharacterBrowser({ fileId, kind, r
     const [size, changeSize] = useThumbnailSize();
     const menuPane = usePaneWidth("sections", 176, 120, 480);
     const detailsPane = usePaneWidth("details", 336, 260, 900);
-    // String revisions caused by edits made here; the list already shows those, so they don't refetch it.
-    const ownRevisions = useRef(new Set<number>());
     const stringRevision = listing?.stringFileId ? files[listing.stringFileId]?.revision : undefined;
 
     useEffect(function loadSections() {
@@ -129,8 +125,6 @@ export const CharacterBrowser = memo(function CharacterBrowser({ fileId, kind, r
 
     useEffect(function loadItems() {
         if (status !== "online" || section == null) return;
-        const ownEdit = stringRevision != null && ownRevisions.current.has(stringRevision);
-        if (ownEdit && listing?.section === section) return;
         let cancelled = false;
         const shownSection = section;
 
@@ -146,7 +140,6 @@ export const CharacterBrowser = memo(function CharacterBrowser({ fileId, kind, r
 
         api.characterItems(fileId, section).then(showItems, showError);
         return () => { cancelled = true; };
-        // `listing` is only read to tell a section switch apart from a String edit; it mustn't refetch by itself.
     }, [api, status, fileId, revision, section, stringRevision]);
 
     function pick(path: string) {
@@ -172,15 +165,6 @@ export const CharacterBrowser = memo(function CharacterBrowser({ fileId, kind, r
         setListing(function withoutRemoved(previous) {
             if (!previous) return previous;
             return { ...previous, items: previous.items.filter((item) => item.path !== path) };
-        });
-    }
-
-    function updateInList(updated: CharacterItem, stringFileId: string, stringFileRevision: number) {
-        ownRevisions.current.add(stringFileRevision);
-        setListing(function withUpdated(previous) {
-            if (!previous) return previous;
-            const updatedItems = previous.items.map((item) => (item.path === updated.path ? updated : item));
-            return { ...previous, stringFileId, items: updatedItems };
         });
     }
 
@@ -265,7 +249,6 @@ export const CharacterBrowser = memo(function CharacterBrowser({ fileId, kind, r
                         onOpenRaw={onOpenRaw}
                         onClose={() => setSelected(null)}
                         onDeleted={() => removeFromList(current.path)}
-                        onSaved={updateInList}
                     />
                 </>
             )}
@@ -394,14 +377,35 @@ function textLabel(kind: Kind, key: string) {
 function stringSource(item: CharacterItem): ReactNode {
     if (item.stringPath) return <>From String: <span className="break-all font-mono">{item.stringPath}</span></>;
     if (item.id == null) return "This isn't an item, so String has nothing for it.";
-    return "String has no entry for this item yet; saving adds one.";
+    return "String has no entry for this item yet; clicking its name or description adds one.";
 }
 
 function textsByKey(texts: CharacterText[] | null | undefined): Record<string, string> {
     return Object.fromEntries((texts ?? []).map((text) => [text.key, text.value]));
 }
 
-function Details({ pane, fileId, kind, revision, section, item, onOpenRaw, onClose, onDeleted, onSaved }: {
+const LEVEL_TEXT = /^h(\d+)$/;
+
+/** Where each of a skill's level texts ("hN") shows among its properties: level/N's path, to the text's key. */
+function levelTextPaths(info: PropTree | null | undefined, path: string, texts: CharacterText[] | null | undefined) {
+    const paths = new Map<string, string>();
+    const levels = info?.children?.find((child) => child.name === "level");
+    const numbers = new Set((levels?.children ?? []).map((child) => child.name));
+    for (const text of texts ?? []) {
+        const level = LEVEL_TEXT.exec(text.key);
+        if (level && numbers.has(level[1])) paths.set(`${path}/level/${level[1]}`, text.key);
+    }
+    return paths;
+}
+
+/** What a level's properties show first: String's text for it, which opens String there when clicked. */
+interface LevelTexts {
+    paths: Map<string, string>;
+    values: Record<string, string>;
+    onOpen?: (key: string) => void;
+}
+
+function Details({ pane, fileId, kind, revision, section, item, onOpenRaw, onClose, onDeleted }: {
     pane: PaneWidth;
     fileId: string;
     kind: Kind;
@@ -411,20 +415,11 @@ function Details({ pane, fileId, kind, revision, section, item, onOpenRaw, onClo
     onOpenRaw?: (path: string) => void;
     onClose: () => void;
     onDeleted: () => void;
-    onSaved: (item: CharacterItem, stringFileId: string, stringRevision: number) => void;
 }) {
-    const { api, readOnly } = useConnection();
+    const { api, readOnly, browseOnly } = useConnection();
     const actions = useActions();
-    const [name, setName] = useState(item.name ?? "");
-    const [desc, setDesc] = useState(item.desc ?? "");
-    const [saving, setSaving] = useState(false);
     const [deleting, setDeleting] = useState(false);
-    const savedTexts = useMemo(() => textsByKey(item.texts), [item.texts]);
-    const [texts, setTexts] = useState<Record<string, string>>(savedTexts);
-    const changedTexts = Object.fromEntries(Object.entries(texts).filter(([key, value]) => value !== savedTexts[key]));
-    const textsChanged = Object.keys(changedTexts).length > 0;
-    const changed = name !== (item.name ?? "") || desc !== (item.desc ?? "") || textsChanged;
-    const editable = !readOnly && item.id != null;
+    const texts = useMemo(() => textsByKey(item.texts), [item.texts]);
     // undefined while loading; null when the item has no info.
     const [info, setInfo] = useState<PropTree | null | undefined>(undefined);
     const [infoError, setInfoError] = useState<string | null>(null);
@@ -433,6 +428,18 @@ function Details({ pane, fileId, kind, revision, section, item, onOpenRaw, onClo
     const editValue: EditValue | undefined = readOnly
         ? undefined
         : (path, value) => actions.editNode(fileId, path, { value });
+    const levelPaths = useMemo(
+        () => (kind === "skill" ? levelTextPaths(info, infoPath, item.texts) : new Map<string, string>()),
+        [kind, info, infoPath, item.texts],
+    );
+    const inLevels = new Set(levelPaths.values());
+    // While a skill's properties load, its level texts wait for them rather than show here and then move.
+    const loadingLevels = kind === "skill" && info === undefined && !infoError;
+    const otherTexts = (item.texts ?? []).filter(
+        (text) => !inLevels.has(text.key) && !(loadingLevels && LEVEL_TEXT.test(text.key)),
+    );
+    // A browse-only server has no raw tree to show String in.
+    const openText = item.id != null && !browseOnly ? (key: string) => void openInString(key) : undefined;
 
     useEffect(function loadInfo() {
         let cancelled = false;
@@ -450,45 +457,24 @@ function Details({ pane, fileId, kind, revision, section, item, onOpenRaw, onClo
         return () => { cancelled = true; };
     }, [api, fileId, item.path, revision]);
 
-    async function save() {
-        if (item.id == null || !changed) return;
-        setSaving(true);
+    /** Opens String's window at one of the item's texts, to edit it there; a missing one is added, empty. */
+    async function openInString(key: string) {
+        if (item.id == null) return;
         try {
-            const request = { id: item.id, section, name, desc, texts: changedTexts };
-            const result = await api.setCharacterStrings(fileId, request);
-            const updated = {
-                ...item,
-                name: result.name,
-                desc: result.desc,
-                stringPath: result.path,
-                texts: result.texts,
-            };
-            onSaved(updated, result.file.id, result.file.revision);
-            // String opens in its own window, where the change waits to be saved; this window stays in front.
+            const result = await api.openCharacterString(fileId, { id: item.id, section, key });
             actions.openFile(result.file);
-            actions.edited(result.file, [parentPath(result.path), result.path]);
-            requestAnimationFrame(() => actions.focusWindow(fileId));
-            actions.toast("success", `Changed ${item.id} in ${result.file.name}. Save that file to keep it.`);
+            if (result.added) {
+                // The text, and maybe the entry holding it, are new: the tree reloads what holds them.
+                const entry = parentPath(result.path);
+                actions.edited(result.file, [parentPath(entry), entry]);
+                actions.toast("success", `Added ${key} for ${item.id} in ${result.file.name}. Save that file to keep it.`);
+            }
+            actions.reveal(result.file.id, result.path);
+            // The window may have just been created; wait a frame so it exists before measuring it.
+            requestAnimationFrame(() => actions.showWindow(result.file.id));
         } catch (error) {
             actions.toast("error", errorMessage(error));
-        } finally {
-            setSaving(false);
         }
-    }
-
-    function submit(event: FormEvent) {
-        event.preventDefault();
-        void save();
-    }
-
-    function reset() {
-        setName(item.name ?? "");
-        setDesc(item.desc ?? "");
-        setTexts(savedTexts);
-    }
-
-    function setText(key: string, value: string) {
-        setTexts((previous) => ({ ...previous, [key]: value }));
     }
 
     async function remove() {
@@ -510,7 +496,14 @@ function Details({ pane, fileId, kind, revision, section, item, onOpenRaw, onClo
     const pictureHeight = Math.round(Math.min(360, Math.max(160, pictureWidth * 0.6)));
     const infoSection = (
         <section aria-label={kind === "skill" ? "Properties" : "Info"} className={`p-4 ${DIVIDER}`}>
-            <InfoSection kind={kind} info={info} error={infoError} path={infoPath} onEdit={editValue} />
+            <InfoSection
+                kind={kind}
+                info={info}
+                error={infoError}
+                path={infoPath}
+                onEdit={editValue}
+                levelTexts={{ paths: levelPaths, values: texts, onOpen: openText }}
+            />
         </section>
     );
 
@@ -542,44 +535,17 @@ function Details({ pane, fileId, kind, revision, section, item, onOpenRaw, onClo
 
             {/* A skill's properties run long (a set of values per level), so its name and description come first. */}
             {kind !== "skill" && infoSection}
-            <form className={`flex flex-col gap-4 p-4 ${DIVIDER}`} onSubmit={submit}>
-                <label className="space-y-1.5">
-                    <span className="text-xs font-medium text-zinc-500">Name</span>
-                    <input
-                        value={name}
-                        onChange={(event) => setName(event.target.value)}
-                        readOnly={!editable}
-                        className="input py-2 text-[13px]"
-                    />
-                </label>
-                <label className="space-y-1.5">
-                    <span className="text-xs font-medium text-zinc-500">Description</span>
-                    <textarea
-                        value={desc}
-                        onChange={(event) => setDesc(event.target.value)}
-                        readOnly={!editable}
-                        rows={6}
-                        className="input resize-y py-2 text-[13px] leading-5"
-                    />
-                </label>
-                {item.texts && item.texts.length > 0 && (
-                    <OtherTexts kind={kind} texts={item.texts} values={texts} editable={editable} onChange={setText} />
-                )}
-                <p className="text-[11px] leading-4 text-zinc-400">{stringSource(item)}</p>
+            <div className={`flex flex-col gap-3 p-4 ${DIVIDER}`}>
+                <dl className="space-y-2">
+                    <StringText label="Name" textKey="name" value={item.name} onOpen={openText} />
+                    <StringText label="Description" textKey="desc" value={item.desc} onOpen={openText} />
+                </dl>
+                {otherTexts.length > 0 && <OtherTexts kind={kind} texts={otherTexts} onOpen={openText} />}
+                <p className="text-[11px] leading-4 text-zinc-400">
+                    {stringSource(item)}
+                    {openText && " Click a text to edit it in String's window."}
+                </p>
                 <div className="flex flex-wrap gap-2">
-                    {editable && (
-                        <button
-                            type="submit"
-                            disabled={!changed || saving}
-                            className="btn-primary px-4 py-2 text-[13px]"
-                            title="Changes String.wz in memory and opens it, so it can be saved from its window"
-                        >
-                            {saving ? "Saving…" : "Save to String"}
-                        </button>
-                    )}
-                    {editable && changed && (
-                        <button type="button" onClick={reset} className={SECONDARY_BUTTON}>Reset</button>
-                    )}
                     {onOpenRaw && (
                         <button type="button" onClick={() => onOpenRaw(item.path)} className={SECONDARY_BUTTON}>
                             Show in raw tree
@@ -598,71 +564,142 @@ function Details({ pane, fileId, kind, revision, section, item, onOpenRaw, onClo
                         </button>
                     )}
                 </div>
-            </form>
+            </div>
             {kind === "skill" && infoSection}
         </aside>
     );
 }
 
-/** String's other text for an item, each editable: a skill's per-level descriptions ("h", "h1", "h2", ...). */
-function OtherTexts({ kind, texts, values, editable, onChange }: {
-    kind: Kind;
-    texts: CharacterText[];
-    values: Record<string, string>;
-    editable: boolean;
-    onChange: (key: string, value: string) => void;
+/** One of String's texts for an item, on one line; clicking it opens String's window at it. */
+function StringText({ label, textKey, value, onOpen }: {
+    label: ReactNode;
+    textKey: string;
+    value: string | null | undefined;
+    onOpen?: (key: string) => void;
 }) {
     return (
-        <fieldset className="space-y-3">
-            <legend className="mb-1.5 text-xs font-medium text-zinc-500">
-                {kind === "skill" ? "Level text" : "Other text"}
-            </legend>
-            {texts.map((text) => (
-                <label key={text.key} className="block space-y-1">
-                    <span className="flex items-baseline gap-1.5 text-[11px] text-zinc-500">
-                        {textLabel(kind, text.key)}
-                        <span className="font-mono text-zinc-400">{text.key}</span>
-                    </span>
-                    <textarea
-                        value={values[text.key] ?? ""}
-                        onChange={(event) => onChange(text.key, event.target.value)}
-                        readOnly={!editable}
-                        rows={2}
-                        className="input resize-y py-1.5 text-[12px] leading-5"
+        <div className="min-w-0 space-y-0.5">
+            <dt className="flex items-baseline gap-1.5 text-[11px] text-zinc-500">
+                {label}
+                <span className="font-mono text-zinc-400">{textKey}</span>
+            </dt>
+            <dd className="min-w-0 text-[13px]">
+                <TextLine textKey={textKey} value={value} onOpen={onOpen} className="block w-full text-left" />
+            </dd>
+        </div>
+    );
+}
+
+/**
+ * A text from String on one line (its line breaks as spaces), the whole of it on hover. With `onOpen`, a button that
+ * opens String's window at it; without, the whole text, wrapped.
+ */
+function TextLine({ textKey, value, onOpen, className }: {
+    textKey: string;
+    value: string | null | undefined;
+    onOpen?: (key: string) => void;
+    className: string;
+}) {
+    const text = value ?? "";
+    const shown = text === "" ? <i className="font-sans text-zinc-400">(empty)</i> : text.replace(/\s*\n\s*/g, " ");
+    if (!onOpen)
+        return <span className={`${className} whitespace-pre-wrap break-words text-zinc-800 dark:text-zinc-200`}>{text}</span>;
+    const button = [
+        "-mx-1.5 min-w-0 cursor-pointer truncate rounded-md px-1.5 font-sans outline-none",
+        "text-zinc-800 hover:bg-zinc-100 hover:text-accent-700 focus-visible:ring-2 focus-visible:ring-accent-500/60",
+        "dark:text-zinc-200 dark:hover:bg-zinc-800 dark:hover:text-accent-300",
+    ].join(" ");
+    return (
+        <button
+            type="button"
+            title={text ? `${text}\n\nClick to edit ${textKey} in String` : `Click to edit ${textKey} in String`}
+            onClick={() => onOpen(textKey)}
+            className={`${button} ${className}`}
+        >
+            {shown}
+        </button>
+    );
+}
+
+/** String's other text for an item, each opening String at it: a skill's "h", or levels it has no properties for. */
+function OtherTexts({ kind, texts, onOpen }: {
+    kind: Kind;
+    texts: CharacterText[];
+    onOpen?: (key: string) => void;
+}) {
+    return (
+        <div className="space-y-1.5">
+            <h3 className="text-xs font-medium text-zinc-500">{kind === "skill" ? "Level text" : "Other text"}</h3>
+            <dl className="space-y-2">
+                {texts.map((text) => (
+                    <StringText
+                        key={text.key}
+                        label={textLabel(kind, text.key)}
+                        textKey={text.key}
+                        value={text.value}
+                        onOpen={onOpen}
                     />
-                </label>
-            ))}
-        </fieldset>
+                ))}
+            </dl>
+        </div>
     );
 }
 
 /** The details' info: loading, an error, nothing, a skill's properties, or an item's info. */
-function InfoSection({ kind, info, error, path, onEdit }: {
+function InfoSection({ kind, info, error, path, onEdit, levelTexts }: {
     kind: Kind;
     info: PropTree | null | undefined;
     error: string | null;
     path: string;
     onEdit?: EditValue;
+    levelTexts: LevelTexts;
 }) {
     if (error) return <p className="error-text text-xs">{error}</p>;
     if (info === undefined) return <div className="space-y-1.5"><Skeleton rows={4} className="h-4" /></div>;
     if (info === null) return <p className="text-xs text-zinc-400">This has no info.</p>;
-    if (kind === "skill") return <SkillProperties info={info} path={path} onEdit={onEdit} />;
+    if (kind === "skill") return <SkillProperties info={info} path={path} onEdit={onEdit} levelTexts={levelTexts} />;
     return <InfoView info={info} path={path} onEdit={onEdit} />;
 }
 
 /**
  * A skill's properties (common, level/1, ..., its flags), every value editable in place unless the server is read
- * only.
+ * only. Each level starts with String's text for it (hN).
  */
-function SkillProperties({ info, path, onEdit }: { info: PropTree; path: string; onEdit?: EditValue }) {
+function SkillProperties({ info, path, onEdit, levelTexts }: {
+    info: PropTree;
+    path: string;
+    onEdit?: EditValue;
+    levelTexts: LevelTexts;
+}) {
+    function lead(nodePath: string) {
+        const key = levelTexts.paths.get(nodePath);
+        return key ? <LevelText key={key} textKey={key} texts={levelTexts} /> : null;
+    }
+
     const properties = shownChildren(info);
     if (properties.length === 0) return <p className="text-xs text-zinc-400">This skill has no properties.</p>;
     return (
         <div className="space-y-1.5 text-[12px]">
             <h3 className={HEADING}>Properties</h3>
-            <InfoNodes nodes={properties} path={path} onEdit={onEdit} className="space-y-0.5 font-mono" />
+            <InfoNodes nodes={properties} path={path} onEdit={onEdit} lead={lead} className="space-y-0.5 font-mono" />
         </div>
+    );
+}
+
+/** A level's text from String (hN), first among its properties; clicking it opens String's window at it. */
+function LevelText({ textKey, texts }: { textKey: string; texts: LevelTexts }) {
+    return (
+        <li>
+            <span className="flex items-baseline justify-between gap-3">
+                <span className="shrink-0 text-zinc-500" title={`String · ${textKey}`}>{textKey}</span>
+                <TextLine
+                    textKey={textKey}
+                    value={texts.values[textKey]}
+                    onOpen={texts.onOpen}
+                    className="flex-1 text-right"
+                />
+            </span>
+        </li>
     );
 }
 
@@ -780,16 +817,23 @@ function InfoView({ info, path, onEdit }: { info: PropTree; path: string; onEdit
     );
 }
 
-/** Raw values below `path`, as a list. */
-function InfoNodes({ nodes, path, onEdit, className }: {
+/** What a list shows before the values below a path, if anything. */
+type Lead = (path: string) => ReactNode;
+
+/** Raw values below `path`, as a list, after what `lead` gives for `path`. */
+function InfoNodes({ nodes, path, onEdit, lead, className }: {
     nodes: PropTree[];
     path: string;
     onEdit?: EditValue;
+    lead?: Lead;
     className: string;
 }) {
     return (
         <ul className={className}>
-            {nodes.map((node) => <InfoNode key={node.name} node={node} path={`${path}/${node.name}`} onEdit={onEdit} />)}
+            {lead?.(path)}
+            {nodes.map((node) => (
+                <InfoNode key={node.name} node={node} path={`${path}/${node.name}`} onEdit={onEdit} lead={lead} />
+            ))}
         </ul>
     );
 }
@@ -798,7 +842,7 @@ function InfoNodes({ nodes, path, onEdit, className }: {
  * One raw value at `path`, editable in place when `onEdit` is given and its type holds a value, with what's below it
  * indented.
  */
-function InfoNode({ node, path, onEdit }: { node: PropTree; path: string; onEdit?: EditValue }) {
+function InfoNode({ node, path, onEdit, lead }: { node: PropTree; path: string; onEdit?: EditValue; lead?: Lead }) {
     const children = shownChildren(node);
     return (
         <li>
@@ -811,6 +855,7 @@ function InfoNode({ node, path, onEdit }: { node: PropTree; path: string; onEdit
                     nodes={children}
                     path={path}
                     onEdit={onEdit}
+                    lead={lead}
                     className="ml-3 space-y-0.5 border-l border-zinc-100 pl-2 dark:border-zinc-800"
                 />
             )}

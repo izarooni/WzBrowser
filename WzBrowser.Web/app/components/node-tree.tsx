@@ -632,7 +632,7 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
                                     dropPath === path
                                         ? "bg-accent-100 ring-2 ring-accent-500 dark:bg-accent-600/25"
                                         : isSelected
-                                            ? "bg-accent-50 text-accent-700 dark:bg-accent-600/15 dark:text-accent-200"
+                                            ? "bg-accent-100 text-accent-700 ring-1 ring-inset ring-accent-200 dark:bg-accent-600/15 dark:text-accent-200 dark:ring-transparent"
                                             : "hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
                                 } ${isCut ? "opacity-45" : ""}`}
                             >
@@ -1035,7 +1035,7 @@ function FrameAnimation({ fileId, path, minFrames = 2, fallback = null }: {
 }) {
     const { api } = useConnection();
     const revision = useWorkspaceData().files[fileId]?.revision;
-    const [frames, setFrames] = useState<{ name: string; width: number; delay: number }[] | null>(null);
+    const [frames, setFrames] = useState<{ name: string; width: number; height: number; delay: number }[] | null>(null);
     const [empty, setEmpty] = useState(false);
     const [index, setIndex] = useState(0);
     const [playing, setPlaying] = useState(true);
@@ -1059,7 +1059,7 @@ function FrameAnimation({ fileId, path, minFrames = 2, fallback = null }: {
                         return d > 0 ? d : DEFAULT_DELAY;
                     } catch { return DEFAULT_DELAY; }
                 }));
-                if (!cancelled) setFrames(canvases.map((c, i) => ({ name: c.name, width: c.width ?? 0, delay: delays[i] })));
+                if (!cancelled) setFrames(canvases.map((c, i) => ({ name: c.name, width: c.width ?? 0, height: c.height ?? 0, delay: delays[i] })));
             } catch { if (!cancelled) setEmpty(true); /* not an animation */ }
         })();
         return () => { cancelled = true; };
@@ -1074,6 +1074,9 @@ function FrameAnimation({ fileId, path, minFrames = 2, fallback = null }: {
 
     if (!frames) return empty ? <>{fallback}</> : null;
     const cur = frames[index % count];
+    // The picture's box fits the largest frame, so it holds still while smaller frames play inside it.
+    const boxWidth = Math.max(...frames.map((f) => f.width)) * zoom;
+    const boxHeight = Math.max(...frames.map((f) => f.height)) * zoom;
     const btn = "rounded-md px-2.5 py-1 text-xs font-semibold transition";
 
     // The controls sit above the picture: below it, they'd jump up and down as frames of different heights play.
@@ -1099,12 +1102,14 @@ function FrameAnimation({ fileId, path, minFrames = 2, fallback = null }: {
             {count > 1 && <input type="range" min={0} max={count - 1} value={index % count} aria-label="Frame"
                 onChange={(e) => { setPlaying(false); setIndex(Number(e.target.value)); }} className="w-full" />}
             <div className="checker grid max-h-64 min-h-24 place-items-center overflow-auto rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
-                <img
-                    src={api.pngUrl(fileId, joinPath(path, cur.name), revision)}
-                    alt={`Frame ${cur.name}`}
-                    draggable={false}
-                    style={{ imageRendering: "pixelated", width: cur.width ? cur.width * zoom : undefined, maxWidth: "none" }}
-                />
+                <div className="grid place-items-center" style={{ width: boxWidth || undefined, height: boxHeight || undefined }}>
+                    <img
+                        src={api.pngUrl(fileId, joinPath(path, cur.name), revision)}
+                        alt={`Frame ${cur.name}`}
+                        draggable={false}
+                        style={{ imageRendering: "pixelated", width: cur.width ? cur.width * zoom : undefined, maxWidth: "none" }}
+                    />
+                </div>
             </div>
         </div>
     );

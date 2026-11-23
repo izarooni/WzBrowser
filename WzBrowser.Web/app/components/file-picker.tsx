@@ -4,6 +4,7 @@ import { ApiError, ENCRYPTIONS, type FilePeek, type FsEntry, type FsListing, typ
 import { useConnection } from "../lib/connection";
 import { ArrowUp, Check, ChevronUpDown, Document, Folder, XMark } from "./icons";
 import { errorMessage } from "../lib/errors";
+import { RecentPathInput, rememberRecentDir } from "./recent-folders";
 
 const LAST_DIR_KEY = "wzbrowser.lastDir";
 
@@ -14,20 +15,6 @@ const writeLastDir = (dir: string) => {
     try { localStorage.setItem(LAST_DIR_KEY, dir); } catch { /* not persisted */ }
 };
 
-// Folders files were opened from, most recent first. Kept in the browser only; the server never sees them.
-const RECENT_DIRS_KEY = "wzbrowser.recentDirs";
-const MAX_RECENT_DIRS = 10;
-
-const readRecentDirs = (): string[] => {
-    try {
-        const v: unknown = JSON.parse(localStorage.getItem(RECENT_DIRS_KEY) ?? "[]");
-        return Array.isArray(v) ? v.filter((d): d is string => typeof d === "string") : [];
-    } catch { return []; }
-};
-const writeRecentDirs = (dirs: string[]) => {
-    try { localStorage.setItem(RECENT_DIRS_KEY, JSON.stringify(dirs)); } catch { /* not persisted */ }
-};
-const sameDir = (a: string, b: string) => a.replace(/[\\/]+$/, "").toLowerCase() === b.replace(/[\\/]+$/, "").toLowerCase();
 /** "D:\Games\Data\Mob.wz" -> "D:\Games\Data". */
 const parentDir = (path: string) => path.replace(/[\\/][^\\/]*$/, "") || path;
 
@@ -147,22 +134,7 @@ function FolderPicker({ open, onClose, onOpened }: PickerProps) {
     const [loading, setLoading] = useState(false);
     const [opening, setOpening] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
-    const [recentDirs, setRecentDirs] = useState<string[]>([]);
-    const [showRecent, setShowRecent] = useState(false);
     const peeks = usePeeks(listing?.entries);
-
-    useEffect(() => { if (open) setRecentDirs(readRecentDirs()); }, [open]);
-
-    const rememberDir = (dir: string) => {
-        const next = [dir, ...readRecentDirs().filter((d) => !sameDir(d, dir))].slice(0, MAX_RECENT_DIRS);
-        writeRecentDirs(next);
-        setRecentDirs(next);
-    };
-    const forgetDir = (dir: string) => {
-        const next = readRecentDirs().filter((d) => !sameDir(d, dir));
-        writeRecentDirs(next);
-        setRecentDirs(next);
-    };
 
     const go = useCallback(async (path: string): Promise<boolean> => {
         setLoading(true);
@@ -193,7 +165,7 @@ function FolderPicker({ open, onClose, onOpened }: PickerProps) {
         setError(null);
         try {
             const file = await api.open(path, encryption);
-            rememberDir(parentDir(path));
+            rememberRecentDir(parentDir(path));
             onOpened(file);
         } catch (e) {
             setError(errorMessage(e));
@@ -204,7 +176,6 @@ function FolderPicker({ open, onClose, onOpened }: PickerProps) {
 
     const submitPath = (e: FormEvent) => {
         e.preventDefault();
-        setShowRecent(false);
         const p = pathInput.trim();
         if (!p) return go("");
         if (/\.(wz|ms)$/i.test(p)) openFile(p);
@@ -240,53 +211,12 @@ function FolderPicker({ open, onClose, onOpened }: PickerProps) {
                             >
                                 <ArrowUp className="size-5" />
                             </button>
-                            <div className="relative min-w-0 flex-1">
-                                <input
-                                    value={pathInput}
-                                    onChange={(e) => setPathInput(e.target.value)}
-                                    onFocus={() => setShowRecent(true)}
-                                    onClick={() => setShowRecent(true)}
-                                    onBlur={() => setShowRecent(false)}
-                                    onKeyDown={(e) => {
-                                        // Close the list first; a second Escape closes the dialog.
-                                        if (e.key === "Escape" && showRecent && recentDirs.length > 0) { e.preventDefault(); e.stopPropagation(); setShowRecent(false); }
-                                    }}
-                                    placeholder="D:\Games\MapleStory"
-                                    spellCheck={false}
-                                    autoComplete="off"
-                                    className="input font-mono"
-                                />
-                                {showRecent && recentDirs.length > 0 && (
-                                    // mousedown is cancelled so clicking an item doesn't blur the input (which would hide the list first).
-                                    <div onMouseDown={(e) => e.preventDefault()}
-                                        className="absolute inset-x-0 top-full z-10 mt-1.5 rounded-xl border border-zinc-200 bg-white p-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
-                                        <p className="px-3 pb-1.5 pt-1 text-xs font-medium text-zinc-400">Recent folders</p>
-                                        <ul className="max-h-72 overflow-y-auto">
-                                            {recentDirs.map((dir) => (
-                                                <li key={dir} className="group flex items-center rounded-lg hover:bg-accent-50 dark:hover:bg-zinc-800">
-                                                    <button
-                                                        type="button"
-                                                        title={dir}
-                                                        onClick={() => { setShowRecent(false); go(dir).then((ok) => { if (!ok) forgetDir(dir); }); }}
-                                                        className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left text-sm"
-                                                    >
-                                                        <Folder className="size-4 shrink-0 text-amber-500" />
-                                                        <span className="truncate font-mono">{dir}</span>
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        aria-label={`Remove ${dir} from recent folders`}
-                                                        onClick={() => forgetDir(dir)}
-                                                        className="mr-1 rounded-md p-1.5 text-zinc-400 opacity-0 transition hover:bg-zinc-200 hover:text-zinc-700 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
-                                                    >
-                                                        <XMark className="size-3.5" />
-                                                    </button>
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </div>
-                                )}
-                            </div>
+                            <RecentPathInput
+                                value={pathInput}
+                                onChange={setPathInput}
+                                onPick={go}
+                                placeholder="D:\Games\MapleStory"
+                            />
                             <button type="submit" className="btn-secondary">Go</button>
                         </form>
 

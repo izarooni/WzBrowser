@@ -84,22 +84,18 @@ export interface CharacterText { key: string; value: string }
 /** One section's items; `stringFileId` is the String file their names came from. */
 export interface CharacterItems { items: CharacterItem[]; stringFileId: string | null }
 
-/** Name, description and other text to set; `texts` by key ("h1", ...). */
-export interface CharacterStringsRequest {
+/** Which of an item's texts to open String at: "name", "desc", "h1", ..., or the entry when left out. */
+export interface CharacterStringOpenRequest {
     id: number;
     section: string;
-    name: string;
-    desc: string;
-    texts?: Record<string, string>;
+    key?: string;
 }
 
-/** The String file (now open with the change unsaved) and the entry as it now is. */
-export interface CharacterStringsResult {
+/** The String file (now open), the text's node in it, and whether it was missing and added, unsaved. */
+export interface CharacterStringOpenResult {
     file: OpenedFile;
     path: string;
-    name: string | null;
-    desc: string | null;
-    texts: CharacterText[] | null;
+    added: boolean;
 }
 
 /** A property and everything below it, in file order. */
@@ -455,13 +451,10 @@ export function createApi(base: string) {
          */
         characterInfo: (id: string, path: string) =>
             request<PropTree | undefined>(`/api/files/${id}/character/info?path=${q(path)}`),
-        /**
-         * Sets an item's name, description and other text in String (adding its entry and any value when missing);
-         * String is then listed as open.
-         */
-        setCharacterStrings: (id: string, body: CharacterStringsRequest) =>
-            request<CharacterStringsResult>(`/api/files/${id}/character/strings`, {
-                method: "PUT",
+        /** Opens String at an item's text, adding it (empty, unsaved) when missing unless the server is read only. */
+        openCharacterString: (id: string, body: CharacterStringOpenRequest) =>
+            request<CharacterStringOpenResult>(`/api/files/${id}/character/strings/open`, {
+                method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(body),
             }),

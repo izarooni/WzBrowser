@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { DEFAULT_API_BASE } from "../lib/api";
 import { useConnection, type ConnectionStatus } from "../lib/connection";
 import { useActions, useWorkspaceData } from "../lib/workspace";
+import { FileMenu } from "./file-menu";
 import { Moon, Sliders, Sun, XMark } from "./icons";
 import { XmlExportDialog } from "./xml-export-dialog";
 
@@ -159,10 +160,13 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="flex h-dvh flex-col">
             <header className="z-30 shrink-0 border-b border-zinc-200/80 bg-white/80 backdrop-blur-md dark:border-zinc-800/80 dark:bg-zinc-950/80">
                 <div className="flex h-16 items-center justify-between gap-6 px-6">
-                    <Link to="/" className="flex items-center gap-3.5">
-                        <img src="/icon-48.png" alt="" width={36} height={36} className="size-9" />
-                        <span className="text-lg font-semibold tracking-tight">WzBrowser</span>
-                    </Link>
+                    <div className="flex items-center gap-4">
+                        <Link to="/" className="flex items-center gap-3.5">
+                            <img src="/icon-48.png" alt="" width={36} height={36} className="size-9" />
+                            <span className="text-lg font-semibold tracking-tight">WzBrowser</span>
+                        </Link>
+                        <FileMenu />
+                    </div>
                     <div className="flex items-center gap-3">
                         {readOnly && (
                             <span title="The server was started with --read-only, so files can be viewed but not changed" className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">

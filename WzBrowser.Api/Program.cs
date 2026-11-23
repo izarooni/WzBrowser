@@ -88,9 +88,9 @@ app.UseCors();
 app.Use(ReportReads);
 
 // With --read-only, everyone (this computer too) may look but not touch: nothing is edited, saved or converted. Opening
-// files and following links only add files to the shared list, so they're allowed. MCP is all POSTs, so it passes here
+// files, following links and opening String at an item's text only add files to the shared list, so they're allowed. MCP is all POSTs, so it passes here
 // and WzMcpTools refuses its editing tools itself.
-var readOnlyAllowed = new System.Text.RegularExpressions.Regex(@"^(/api/files(/[^/]+/(lookup|ref/open))?/?|/mcp(/.*)?)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+var readOnlyAllowed = new System.Text.RegularExpressions.Regex(@"^(/api/files(/[^/]+/(lookup|ref/open|character/strings/open))?/?|/mcp(/.*)?)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 app.Use(async (ctx, next) =>
 {
     var method = ctx.Request.Method;
@@ -288,7 +288,9 @@ api.MapGet("/files/{id}/character/picture", (string id, string path, HttpContext
 // 204 when the item has no info.
 api.MapGet("/files/{id}/character/info", (string id, string path, WzService wz) =>
     wz.CharacterInfo(id, path) is { } info ? Results.Ok(info) : Results.NoContent());
-api.MapPut("/files/{id}/character/strings", (string id, CharacterStringRequest req, WzService wz) => wz.SetCharacterStrings(id, req));
+// Opens String at an item's name, description or other text, to edit it there.
+api.MapPost("/files/{id}/character/strings/open", (string id, CharacterStringOpenRequest req, WzService wz) =>
+    wz.OpenCharacterString(id, req));
 api.MapGet("/files/{id}/png", (string id, string path, WzService wz) =>
     Results.File(wz.Png(id, path), "image/png"));
 // Every canvas under a node (a folder, .img or property), as PNGs in a zip laid out like the tree.

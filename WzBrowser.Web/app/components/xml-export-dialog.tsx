@@ -5,6 +5,7 @@ import { useConnection } from "../lib/connection";
 import { EncryptionSelect, libraryLabels } from "./file-picker";
 import { ArrowUp, Check, Document, Folder, XMark } from "./icons";
 import { errorMessage } from "../lib/errors";
+import { RecentPathInput, rememberRecentDir } from "./recent-folders";
 
 const LAST_DIR_KEY = "wzbrowser.lastDir";
 const LAST_OUTPUT_KEY = "wzbrowser.xmlOutput";
@@ -72,6 +73,11 @@ export function XmlExportDialog({ open, onClose }: { open: boolean; onClose: () 
             const out = output.trim();
             setJob(await api.startXmlExport([...selected], out, encryption));
             write(LAST_OUTPUT_KEY, out);
+            // The folders converted from, then the one written to, so the output ends up first.
+            if (!library)
+                for (const dir of new Set([...selected].map((path) => path.replace(/[\\/][^\\/]*$/, ""))))
+                    rememberRecentDir(dir);
+            rememberRecentDir(out);
         } catch (e) {
             setError(errorMessage(e));
         } finally {
@@ -119,13 +125,14 @@ export function XmlExportDialog({ open, onClose }: { open: boolean; onClose: () 
                             <div className="space-y-5 p-8 pt-6">
                                 <div className="space-y-2">
                                     <label htmlFor="xml-output" className="text-sm font-medium text-zinc-600 dark:text-zinc-300">Output folder</label>
-                                    <input
+                                    <RecentPathInput
                                         id="xml-output"
                                         value={output}
-                                        onChange={(e) => { setOutput(e.target.value); setOutputTouched(true); }}
+                                        onChange={(value) => { setOutput(value); setOutputTouched(true); }}
+                                        onPick={(dir) => { setOutput(dir); setOutputTouched(true); }}
                                         placeholder="D:\Server\wz"
-                                        spellCheck={false}
-                                        className="input font-mono"
+                                        above
+                                        className="block"
                                     />
                                     <p className="text-xs text-zinc-400">Files already there are overwritten.</p>
                                 </div>
@@ -248,7 +255,7 @@ function FolderSource({ open, selected, toggle, suggestOutput }: SourceProps) {
                 >
                     <ArrowUp className="size-5" />
                 </button>
-                <input value={pathInput} onChange={(e) => setPathInput(e.target.value)} placeholder="D:\Games\MapleStory" spellCheck={false} className="input font-mono" />
+                <RecentPathInput value={pathInput} onChange={setPathInput} onPick={go} placeholder="D:\Games\MapleStory" />
                 <button type="submit" className="btn-secondary">Go</button>
             </form>
 

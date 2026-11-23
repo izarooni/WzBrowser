@@ -33,22 +33,13 @@ public record CharacterText(string Key, string Value);
 public record CharacterItems(List<CharacterItem> Items, string? StringFileId);
 
 /// <param name="Section">The section the item is in, used to find String's group for it when it has no entry yet.</param>
-/// <param name="Texts">Other text to set by key ("h1", ...), added when the entry doesn't have it.</param>
-public record CharacterStringRequest(
-    int Id,
-    string Section,
-    string? Name,
-    string? Desc,
-    Dictionary<string, string>? Texts = null);
+/// <param name="Key">The text to show ("name", "desc", "h1", ...), or null for the entry itself.</param>
+public record CharacterStringOpenRequest(int Id, string Section, string? Key = null);
 
-/// <param name="File">The String file, now listed as open and with unsaved changes.</param>
-/// <param name="Path">The item's node in it.</param>
-public record CharacterStringResult(
-    OpenedFileDto File,
-    string Path,
-    string? Name,
-    string? Desc,
-    List<CharacterText>? Texts);
+/// <param name="File">The String file, now listed as open.</param>
+/// <param name="Path">The text's node in it, or the entry's.</param>
+/// <param name="Added">Whether the entry or the text was missing and added, empty, as an unsaved change.</param>
+public record CharacterStringOpenResult(OpenedFileDto File, string Path, bool Added);
 
 public sealed partial class WzService
 {
@@ -464,18 +455,15 @@ public sealed partial class WzService
     };
 
     /// <summary>
-    /// Sets an item's name, description and other text in String (Eqp.img, Skill.img, or the Item tab's image), adding
-    /// its entry and any value when missing (see <see cref="AddStringEntry"/>). String becomes a listed open file with
-    /// unsaved changes, to be saved from its window.
+    /// Opens the String file naming an item (Eqp.img, Skill.img, or the Item tab's image) as a listed file and finds
+    /// one of its texts there, to be revealed and edited in String's tree. Unless the server is read only, an entry or
+    /// text that's missing is added, empty (see <see cref="AddStringEntry"/>); read only, the nearest node is given.
     /// </summary>
-    public CharacterStringResult SetCharacterStrings(string id, CharacterStringRequest request)
+    public CharacterStringOpenResult OpenCharacterString(string id, CharacterStringOpenRequest request)
     {
         var character = GetCharacter(id);
-        if (request.Name == null && request.Desc == null && request.Texts is not { Count: > 0 })
-            throw new ArgumentException("Nothing to change.");
-        foreach (var key in request.Texts?.Keys ?? Enumerable.Empty<string>())
-            if (key.Length == 0 || key.Contains('/') || key is "name" or "desc")
-                throw new ArgumentException($"'{key}' isn't a text to set here.");
+        if (request.Key is { } key && (key.Length == 0 || key.Contains('/')))
+            throw new ArgumentException($"'{key}' isn't a text of String's.");
         var image = StringImageFor(character, request.Section)
             ?? throw new InvalidDataException("String doesn't name the items in this section.");
         if (ItemStringFiles(character, request.Section).FirstOrDefault() is not ({ } fileId, { } entry, { } strings))
@@ -483,22 +471,35 @@ public sealed partial class WzService
 
         lock (entry.Lock)
         {
-            var item = FindStringEntry(strings.WzProperties, request.Id) ?? AddStringEntry(character, strings, request);
-            SetText(item, "name", request.Name);
-            SetText(item, "desc", request.Desc);
-            foreach (var (key, value) in request.Texts ?? [])
-                SetText(item, key, value);
+            var added = false;
+            var item = FindStringEntry(strings.WzProperties, request.Id);
+            if (item == null)
+            {
+                if (ReadOnly) throw new KeyNotFoundException($"String has no entry for {request.Id}.");
+                item = AddStringEntry(character, strings, request.Id, request.Section);
+                added = true;
+            }
 
-            strings.Changed = true;
-            Touch(entry);
+            WzImageProperty node = item;
+            if (request.Key is { } name)
+            {
+                if (item[name] is { } text)
+                    node = text;
+                else if (!ReadOnly)
+                {
+                    node = new WzStringProperty(name, "");
+                    item.AddProperty(node);
+                    added = true;
+                }
+            }
+
+            if (added)
+            {
+                strings.Changed = true;
+                Touch(entry);
+            }
             entry.Hidden = false;
-
-            return new CharacterStringResult(
-                Describe(fileId, entry),
-                PathInImage(item),
-                Text(item["name"]),
-                Text(item["desc"]),
-                OtherTexts(item));
+            return new CharacterStringOpenResult(Describe(fileId, entry), PathInImage(node), added);
         }
     }
 
@@ -507,9 +508,9 @@ public sealed partial class WzService
     /// that's all it holds (Etc.img/Etc), else at its root; an equipment one under the group named like its section
     /// (Eqp/Weapon).
     /// </summary>
-    private static WzSubProperty AddStringEntry(Entry character, WzImage strings, CharacterStringRequest request)
+    private static WzSubProperty AddStringEntry(Entry character, WzImage strings, int id, string section)
     {
-        var item = new WzSubProperty(request.Id.ToString());
+        var item = new WzSubProperty(id.ToString());
         if (character.Kind is "item" or "skill")
         {
             if (strings.WzProperties is [WzSubProperty group] && !int.TryParse(group.Name, out _))
@@ -519,28 +520,15 @@ public sealed partial class WzService
             return item;
         }
 
-        var section = Normalize(request.Section);
+        section = Normalize(section);
         var slot = section.Length > 0
             ? section[(section.LastIndexOf('/') + 1)..]
             : System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(character.Path)) ?? "";
         var groupName = StringGroups.GetValueOrDefault(slot, slot);
         var top = strings["Eqp"] ?? strings.WzProperties.FirstOrDefault();
         if (top?[groupName] is not WzSubProperty parent)
-            throw new InvalidDataException($"String's {EqpImg} has no '{groupName}' group to add item {request.Id} to.");
+            throw new InvalidDataException($"String's {EqpImg} has no '{groupName}' group to add item {id} to.");
         parent.AddProperty(item);
         return item;
-    }
-
-    /// <summary>Sets one of an entry's texts. Leaving one it doesn't have blank doesn't add an empty one.</summary>
-    private static void SetText(WzSubProperty item, string name, string? value)
-    {
-        if (value == null || value.Length == 0 && item[name] == null) return;
-        if (item[name] is WzStringProperty text)
-        {
-            text.Value = value;
-            return;
-        }
-        item[name]?.Remove();
-        item.AddProperty(new WzStringProperty(name, value));
     }
 }

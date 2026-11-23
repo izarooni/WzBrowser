@@ -16,6 +16,14 @@
 }
 
 @layer base {
+    /* Light mode is a slightly muted grey rather than paper white: panels ("white") and the greys just below them are
+       taken down a step. Dark mode keeps Tailwind's own values. */
+    html:not(.dark) {
+        --color-white: oklch(0.972 0.002 286);
+        --color-zinc-50: oklch(0.948 0.003 286);
+        --color-zinc-100: oklch(0.925 0.004 286);
+        --color-zinc-200: oklch(0.895 0.005 286);
+    }
     html { color-scheme: light; }
     html.dark { color-scheme: dark; }
     body { @apply bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100; }
@@ -77,7 +85,7 @@
 
 /* Checkerboard behind sprites so transparent pixels are visible. */
 .checker {
-    background-color: #fff;
+    background-color: oklch(0.985 0 0);
     background-image:
         linear-gradient(45deg, #e4e4e7 25%, transparent 25%, transparent 75%, #e4e4e7 75%),
         linear-gradient(45deg, #e4e4e7 25%, transparent 25%, transparent 75%, #e4e4e7 75%);
@@ -93,7 +101,7 @@
 
 /* Dotted workspace background; position is driven by the pan offset inline. */
 .canvas-dots {
-    background-color: #f4f4f5;
+    background-color: oklch(0.915 0.004 286);
     background-image: radial-gradient(circle, rgb(161 161 170 / 0.55) 1.2px, transparent 1.2px);
     background-size: 28px 28px;
 }
