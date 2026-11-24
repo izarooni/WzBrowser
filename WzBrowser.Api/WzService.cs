@@ -235,6 +235,8 @@ public sealed partial class WzService(string? root = null)
         /// <summary>True when the in-memory tree differs from the file on disk.</summary>
         public bool Dirty { get; set; }
         public string? SavedTo { get; set; }
+        /// <summary>Its file was let go of; a request that was waiting for the lock can't read it anymore.</summary>
+        public bool Closed { get; set; }
         public string Kind { get; set; } = "generic";
         /// <summary>A quest archive in the modular layout: {id}.img/QuestInfo instead of QuestInfo.img/{id}.</summary>
         public bool ModularQuests { get; set; }
@@ -412,6 +414,7 @@ public sealed partial class WzService(string? root = null)
         if (!_files.TryRemove(id, out var entry)) return false;
         lock (entry.Lock)
         {
+            entry.Closed = true;
             entry.Names?.Dispose();
             entry.File.Dispose();
         }
@@ -562,7 +565,7 @@ public sealed partial class WzService(string? root = null)
     // ---------------------------------------------------------------- helpers
 
     private Entry Get(string id) =>
-        _files.TryGetValue(id, out var e) ? e : throw new KeyNotFoundException($"No open file with id '{id}'.");
+        _files.TryGetValue(id, out var e) ? e : throw new FileNotOpenException(id);
 
     private static OpenedFileDto Describe(string id, Entry entry)
     {

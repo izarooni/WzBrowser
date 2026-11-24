@@ -1,5 +1,6 @@
 import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from "@headlessui/react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { FilePicker } from "../components/file-picker";
 import { onFilesRead, type LookupKind, type NodeCreate, type NodeEdit, type OpenedFile, type WzNode } from "./api";
 import { useConnection } from "./connection";
@@ -350,10 +351,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             confirmLabel: "Close and discard",
             danger: true,
         }))) return;
+        // The window goes first, so its views stop asking for a file that's closed.
+        flushSync(() => {
+            dispatch({ type: "remove", id });
+            setFiles((cur) => { const { [id]: _gone, ...rest } = cur; return rest; });
+            setClipboard((c) => (c?.fileId === id ? null : c));
+        });
         await api.close(id).catch(() => {});
-        dispatch({ type: "remove", id });
-        setFiles((cur) => { const { [id]: _gone, ...rest } = cur; return rest; });
-        setClipboard((c) => (c?.fileId === id ? null : c));
     }, [api, confirm]);
 
     const paste = useCallback<Actions["paste"]>(async (targetFileId, targetPath, src, move) => {

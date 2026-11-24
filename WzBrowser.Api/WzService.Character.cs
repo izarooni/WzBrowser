@@ -329,9 +329,16 @@ public sealed partial class WzService
         PropTree? InfoTree(object item)
         {
             if (entry.Kind == "skill") return item is WzImageProperty skill ? ToTree(skill) : null;
-            return Child(item, "info") is { } info ? ToTree(info) : null;
+            return ChildTree(item, "info");
         }
     }
+
+    /// <summary>An item's spec (what using it does: hp, mp, time, ...) with everything below it, or null when it has none.</summary>
+    public PropTree? CharacterSpec(string id, string path) =>
+        ReadItem(GetCharacter(id), path, item => ChildTree(item, "spec"));
+
+    private static PropTree? ChildTree(object item, string name) =>
+        Child(item, name) is { } child ? ToTree(child) : null;
 
     /// <summary>
     /// Reads an item: an .img (Weapon/01302000.img, Pet/5000000.img) or an item node in one (Consume/0200.img/02000000).
@@ -345,6 +352,7 @@ public sealed partial class WzService
         lock (entry.Lock)
         {
             if (cancelled.IsCancellationRequested) return default;
+            if (entry.Closed) throw new FileNotOpenException(FileId(entry.Path));
             if (Resolve(entry.File, string.Join('/', segments[..(imageIndex + 1)])) is not WzImage image)
                 throw new KeyNotFoundException("Not an item of this file.");
             return WithParsed(image, ReadNode);

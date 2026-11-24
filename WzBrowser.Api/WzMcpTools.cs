@@ -40,7 +40,7 @@ public sealed class WzMcpTools(WzService wz)
     [McpServerTool(Name = "wz_close", Destructive = true)]
     [Description("Closes an open file. Unsaved edits are lost.")]
     public string Close([Description("File id.")] string file) =>
-        Write(() => wz.Close(file) ? "Closed." : throw new KeyNotFoundException($"No open file with id '{file}'."));
+        Write(() => wz.Close(file) ? "Closed." : throw new FileNotOpenException(file));
 
     [McpServerTool(Name = "wz_save")]
     [Description("Writes the file with its edits to a NEW .wz file (Name.edited.wz, Name.edited2.wz, ... beside it, or `path`). Never overwrites anything. The open file then continues from the new one.")]

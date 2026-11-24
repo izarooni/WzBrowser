@@ -53,18 +53,13 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(policy => policy
 
 var app = builder.Build();
 
-app.UseExceptionHandler(errors => errors.Run(async ctx =>
+// A request can always arrive just after its file was closed: it gets its 404, but that's no error to log.
+app.UseExceptionHandler(new ExceptionHandlerOptions
 {
-    var ex = ctx.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
-    ctx.Response.StatusCode = ex switch
-    {
-        KeyNotFoundException or FileNotFoundException or DirectoryNotFoundException => 404,
-        ArgumentException or InvalidDataException => 400,
-        UnauthorizedAccessException => 403,
-        _ => 500,
-    };
-    await ctx.Response.WriteAsJsonAsync(new { error = ex?.Message ?? "Unknown error" });
-}));
+    ExceptionHandler = WriteError,
+    AllowStatusCode404Response = true,
+    SuppressDiagnosticsCallback = failure => failure.Exception is FileNotOpenException,
+});
 
 // Chrome's Private Network Access: a public page calling a private/loopback address sends this preflight header
 // and requires the matching response header. Registered before UseCors because CORS short-circuits preflights;
@@ -287,6 +282,9 @@ api.MapGet("/files/{id}/character/picture", (string id, string path, HttpContext
 // 204 when the item has no info.
 api.MapGet("/files/{id}/character/info", (string id, string path, WzService wz) =>
     wz.CharacterInfo(id, path) is { } info ? Results.Ok(info) : Results.NoContent());
+// What using the item does; 204 when it has no spec.
+api.MapGet("/files/{id}/character/spec", (string id, string path, WzService wz) =>
+    wz.CharacterSpec(id, path) is { } spec ? Results.Ok(spec) : Results.NoContent());
 // Opens String at an item's name, description or other text, to edit it there.
 api.MapPost("/files/{id}/character/strings/open", (string id, CharacterStringOpenRequest req, WzService wz) =>
     wz.OpenCharacterString(id, req));
@@ -346,6 +344,20 @@ Console.WriteLine($"MCP server: http://{host}:{port}/mcp");
 if (wzService.Root != null) Console.WriteLine($"Serving only the .wz files in {wzService.Root}");
 if (readOnly) Console.WriteLine("Read only: files can be viewed but not changed");
 app.Run();
+
+/// <summary>Answers a failed request with its error's message.</summary>
+static async Task WriteError(HttpContext ctx)
+{
+    var ex = ctx.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
+    ctx.Response.StatusCode = ex switch
+    {
+        KeyNotFoundException or FileNotFoundException or DirectoryNotFoundException => 404,
+        ArgumentException or InvalidDataException => 400,
+        UnauthorizedAccessException => 403,
+        _ => 500,
+    };
+    await ctx.Response.WriteAsJsonAsync(new { error = ex?.Message ?? "Unknown error" });
+}
 
 // Reports the other files a request read (String.wz for names, ...), so the web app can open a window for each.
 static async Task ReportReads(HttpContext context, Func<Task> next)

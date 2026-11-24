@@ -438,6 +438,35 @@ interface LevelTexts {
     onOpen?: (key: string) => void;
 }
 
+/** Loads one of an item's trees, again after edits. `tree` is undefined while loading, null when the item has none. */
+function usePropTree(
+    load: (fileId: string, path: string) => Promise<PropTree | undefined>,
+    fileId: string,
+    path: string,
+    revision: number,
+) {
+    const [tree, setTree] = useState<PropTree | null | undefined>(undefined);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(function loadTree() {
+        let cancelled = false;
+        setError(null);
+
+        function showTree(loaded: PropTree | undefined) {
+            if (!cancelled) setTree(loaded ?? null);
+        }
+
+        function showError(reason: unknown) {
+            if (!cancelled) setError(errorMessage(reason));
+        }
+
+        load(fileId, path).then(showTree, showError);
+        return () => { cancelled = true; };
+    }, [load, fileId, path, revision]);
+
+    return { tree, error };
+}
+
 function Details({ pane, fileId, kind, revision, section, item, onOpenRaw, onClose, onDeleted }: {
     pane: PaneWidth;
     fileId: string;
@@ -453,9 +482,7 @@ function Details({ pane, fileId, kind, revision, section, item, onOpenRaw, onClo
     const actions = useActions();
     const [deleting, setDeleting] = useState(false);
     const texts = useMemo(() => textsByKey(item.texts), [item.texts]);
-    // undefined while loading; null when the item has no info.
-    const [info, setInfo] = useState<PropTree | null | undefined>(undefined);
-    const [infoError, setInfoError] = useState<string | null>(null);
+    const { tree: info, error: infoError } = usePropTree(api.characterInfo, fileId, item.path, revision);
     // Where the info's values are in the file, to edit them: an item's info node, or the skill itself.
     const infoPath = kind === "skill" ? item.path : `${item.path}/info`;
     const editValue: EditValue | undefined = readOnly
@@ -473,22 +500,6 @@ function Details({ pane, fileId, kind, revision, section, item, onOpenRaw, onClo
     );
     // A browse-only server has no raw tree to show String in.
     const openText = item.id != null && !browseOnly ? (key: string) => void openInString(key) : undefined;
-
-    useEffect(function loadInfo() {
-        let cancelled = false;
-        setInfoError(null);
-
-        function showInfo(tree: PropTree | null | undefined) {
-            if (!cancelled) setInfo(tree ?? null);
-        }
-
-        function showError(reason: unknown) {
-            if (!cancelled) setInfoError(errorMessage(reason));
-        }
-
-        api.characterInfo(fileId, item.path).then(showInfo, showError);
-        return () => { cancelled = true; };
-    }, [api, fileId, item.path, revision]);
 
     /** Opens String's window at one of the item's texts, to edit it there; a missing one is added, empty. */
     async function openInString(key: string) {
@@ -568,6 +579,9 @@ function Details({ pane, fileId, kind, revision, section, item, onOpenRaw, onClo
 
             {/* A skill's properties run long (a set of values per level), so its name and description come first. */}
             {kind !== "skill" && infoSection}
+            {kind === "item" && (
+                <SpecSection fileId={fileId} path={item.path} revision={revision} onEdit={editValue} />
+            )}
             <div className={`flex flex-col gap-3 p-4 ${DIVIDER}`}>
                 <dl className="space-y-2">
                     <StringText label="Name" textKey="name" value={item.name} onOpen={openText} />
@@ -692,6 +706,32 @@ function InfoSection({ kind, info, error, path, onEdit, levelTexts }: {
     if (info === null) return <p className="text-xs text-zinc-400">This has no info.</p>;
     if (kind === "skill") return <SkillProperties info={info} path={path} onEdit={onEdit} levelTexts={levelTexts} />;
     return <InfoView info={info} path={path} onEdit={onEdit} />;
+}
+
+/** What using an item does (its spec), every value editable in place unless read only; nothing when it has no spec. */
+function SpecSection({ fileId, path, revision, onEdit }: {
+    fileId: string;
+    path: string;
+    revision: number;
+    onEdit?: EditValue;
+}) {
+    const { api } = useConnection();
+    const { tree: spec, error } = usePropTree(api.characterSpec, fileId, path, revision);
+    const properties = spec ? shownChildren(spec) : [];
+    if (!error && properties.length === 0) return null;
+
+    return (
+        <section aria-label="Spec" className={`space-y-1.5 p-4 text-[12px] ${DIVIDER}`}>
+            <h3 className={HEADING}>Spec</h3>
+            {error && <p className="error-text text-xs">{error}</p>}
+            <InfoNodes
+                nodes={properties}
+                path={`${path}/spec`}
+                onEdit={onEdit}
+                className="space-y-0.5 font-mono"
+            />
+        </section>
+    );
 }
 
 /**

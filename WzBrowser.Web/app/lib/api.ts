@@ -437,6 +437,9 @@ export function createApi(base: string) {
          */
         characterInfo: (id: string, path: string) =>
             request<PropTree | undefined>(`/api/files/${id}/character/info?path=${q(path)}`),
+        /** An item's spec node (what using it does: hp, mp, time, ...); undefined when it has none. */
+        characterSpec: (id: string, path: string) =>
+            request<PropTree | undefined>(`/api/files/${id}/character/spec?path=${q(path)}`),
         /** Opens String at an item's text, adding it (empty, unsaved) when missing unless the server is read only. */
         openCharacterString: (id: string, body: CharacterStringOpenRequest) =>
             request<CharacterStringOpenResult>(`/api/files/${id}/character/strings/open`, {
