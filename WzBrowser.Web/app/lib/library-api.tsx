@@ -1,5 +1,5 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
-import type { ItemCategory, OpenedFile } from "./api";
+import type { OpenedFile } from "./api";
 import { useConnection } from "./connection";
 
 /**
@@ -16,7 +16,7 @@ export function LibraryScopeProvider({ fileId, children }: { fileId: string; chi
  * The classic files that get a library table as a tab (lowercase), by the classic file they are or are part of. Keep
  * in step with the server's TableTops, which lets a browse-only server open these files.
  */
-export const TABLE_TOPS = ["mob", "etc", "map", "item", "npc"] as const;
+export const TABLE_TOPS = ["mob", "etc", "map", "npc"] as const;
 
 export type TableTop = (typeof TABLE_TOPS)[number];
 
@@ -32,7 +32,7 @@ export function tableTopOf(file: OpenedFile): TableTop | null {
     return isTableTop(top) ? top : null;
 }
 
-/** The library tables' data and pictures (mobs, maps, items, NPCs), for the install in scope. */
+/** The library tables' data and pictures (mobs, maps, NPCs), for the install in scope. */
 export function useLibraryApi() {
     const { api } = useConnection();
     const file = useContext(LibraryScope);
@@ -42,8 +42,6 @@ export function useLibraryApi() {
         mobSpriteUrl: (id: number) => api.mobSpriteUrl(id, file),
         maps: () => api.maps(file),
         mapMinimapUrl: (id: number) => api.mapMinimapUrl(id, file),
-        items: (category: ItemCategory) => api.items(category, file),
-        itemIconUrl: (id: number) => api.itemIconUrl(id, file),
         npcQuests: () => api.npcQuests(file),
         npcSpriteUrl: (id: number) => api.npcSpriteUrl(id, file),
     }), [api, file]);

@@ -173,10 +173,10 @@ public sealed partial class WzService(string? root = null)
 
     /// <summary>
     /// The classic files whose data the web app shows as a table of the library's data in their window (mobs, mob
-    /// locations, maps, items, NPCs). Keep in step with the web app's DATA_VIEWS.
+    /// locations, maps, NPCs). Keep in step with the web app's DATA_VIEWS.
     /// </summary>
     private static readonly HashSet<string> TableTops =
-        new(["Mob", "Etc", "Map", "Item", "Npc"], StringComparer.OrdinalIgnoreCase);
+        new(["Mob", "Etc", "Map", "Npc"], StringComparer.OrdinalIgnoreCase);
 
     private static readonly char[] Digits = "0123456789".ToCharArray();
 

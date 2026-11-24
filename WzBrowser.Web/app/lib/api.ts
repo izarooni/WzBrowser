@@ -60,7 +60,7 @@ export interface GalleryItem {
 
 /**
  * One entry of a Character or Item file's menu: a root directory ("Weapon", "Consume"), or "" for the .imgs at the root.
- * `count` is null for Item tabs that keep a hundred items to an .img, which the server doesn't read just to count.
+ * `count` is null for Item tabs that keep a hundred items to an .img, which `characterCount` reads to count.
  */
 export interface CharacterSection { path: string; label: string; count: number | null }
 
@@ -202,18 +202,6 @@ export interface MapInfo { id: number; name: string | null; mobs: MapMob[]; npcs
 /** `mobNames`/`npcNames`: id -> name for every mob and NPC in any map. */
 export interface Maps { maps: MapInfo[]; mobNames: Record<string, string>; npcNames: Record<string, string> }
 
-/** The inventory tabs items are grouped in. */
-export type ItemCategory = "equip" | "use" | "setup" | "etc" | "cash";
-/**
- * An item. `slot`: for equipment, the Character folder it's in (Cap, Coat, Weapon, ...). `price`: what a shop pays (0
- * when it doesn't say). `stats`: every number directly under its info (reqLevel, incSTR, tuc, slotMax, cash, ...);
- * `effects`: every number under spec, for items used up (hp, mpR, pad, time, moveTo, ...).
- */
-export interface Item {
-    id: number; slot: string | null; name: string | null; desc: string | null; price: number;
-    stats: Record<string, number>; effects: Record<string, number> | null;
-}
-
 /** A quest an NPC hands out (`starts`) and/or completes (`ends`). `archive` is the quest archive's library name. */
 export interface NpcQuest { id: number; name: string; archive: string; starts: boolean; ends: boolean }
 /** An NPC that at least one quest in the library starts or ends at. */
@@ -299,8 +287,6 @@ export interface Health {
     mobLocations?: boolean;
     /** The library has Map files, so `maps()` has something to show. */
     maps?: boolean;
-    /** The library has Item or Character files, so `items()` has something to show. */
-    items?: boolean;
     /** The library has a quest archive, so `npcQuests()` has something to show. */
     npcs?: boolean;
 }
@@ -373,9 +359,6 @@ export function createApi(base: string) {
         /** Every map with its mobs and NPCs, ordered by map id. */
         maps: (file?: Scope) => request<Maps>(`/api/maps${scope(file)}`),
         mapMinimapUrl: (id: number, file?: Scope) => `${base}/api/maps/${id}/minimap${scope(file)}`,
-        /** Every item in one inventory tab with its stats, name and description, ordered by item id. */
-        items: (category: ItemCategory, file?: Scope) => request<Item[]>(`/api/items/${category}${scope(file)}`),
-        itemIconUrl: (id: number, file?: Scope) => `${base}/api/items/${id}/icon${scope(file)}`,
         /** Every NPC the library's quests start or end at, ordered by NPC id. */
         npcQuests: (file?: Scope) => request<NpcQuests[]>(`/api/npcs/quests${scope(file)}`),
         npcSpriteUrl: (id: number, file?: Scope) => `${base}/api/npcs/${id}/sprite${scope(file)}`,
@@ -436,6 +419,9 @@ export function createApi(base: string) {
          * or a job's .img each.
          */
         characterSections: (id: string) => request<CharacterSection[]>(`/api/files/${id}/character`),
+        /** How many items are in an Item section whose `count` is null. */
+        characterCount: (id: string, section: string, signal: AbortSignal) =>
+            request<number>(`/api/files/${id}/character/count?section=${q(section)}`, { signal }),
         /** One section's items with String's names. */
         characterItems: (id: string, section: string) =>
             request<CharacterItems>(`/api/files/${id}/character/items?section=${q(section)}`),

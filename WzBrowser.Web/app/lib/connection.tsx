@@ -34,8 +34,6 @@ interface Connection {
     mobLocations: boolean;
     /** The library has Map files, so its maps' mobs and NPCs can be listed (a pinned server only). */
     maps: boolean;
-    /** The library has Item or Character files, so its items can be listed (a pinned server only). */
-    items: boolean;
     /** The library has a quest archive, so its NPCs' quests can be listed (a pinned server only). */
     npcs: boolean;
     setBase: (base: string) => void;
@@ -45,16 +43,15 @@ interface Connection {
 const Ctx = createContext<Connection | null>(null);
 
 /** What the library has data for, so its tables are worth showing (a pinned server only). */
-type LibraryData = Pick<Connection, "mobs" | "mobLocations" | "maps" | "items" | "npcs">;
+type LibraryData = Pick<Connection, "mobs" | "mobLocations" | "maps" | "npcs">;
 
-const NO_LIBRARY_DATA: LibraryData = { mobs: false, mobLocations: false, maps: false, items: false, npcs: false };
+const NO_LIBRARY_DATA: LibraryData = { mobs: false, mobLocations: false, maps: false, npcs: false };
 
 function libraryDataOf(health: Health): LibraryData {
     return {
         mobs: !!health.mobs,
         mobLocations: !!health.mobLocations,
         maps: !!health.maps,
-        items: !!health.items,
         npcs: !!health.npcs,
     };
 }

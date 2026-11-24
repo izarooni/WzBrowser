@@ -7,7 +7,6 @@ import { Archive, Download, Minus, Plus, Undo, XMark } from "./icons";
 import { CanvasGallery } from "./canvas-gallery";
 import { CharacterBrowser } from "./character-browser";
 import { CommodityEditor } from "./commodity-editor";
-import { ItemTable } from "./item-table";
 import { MapTable } from "./map-table";
 import { MobLocationTable } from "./mob-locations";
 import { MobTable } from "./mob-table";
@@ -25,7 +24,7 @@ type View = "main" | "data" | "raw";
 interface DataView {
     label: string;
     /** The health check's flag saying a pinned library has this data. */
-    has: "mobs" | "mobLocations" | "maps" | "items" | "npcs";
+    has: "mobs" | "mobLocations" | "maps" | "npcs";
     view: () => ReactNode;
 }
 
@@ -37,7 +36,6 @@ const DATA_VIEWS: Record<TableTop, DataView> = {
     mob: { label: "Mobs", has: "mobs", view: () => <MobTable focus={null} /> },
     etc: { label: "Mob Locations", has: "mobLocations", view: () => <MobLocationTable focus={null} /> },
     map: { label: "Maps", has: "maps", view: () => <MapTable focus={null} /> },
-    item: { label: "Items", has: "items", view: () => <ItemTable /> },
     npc: { label: "NPCs", has: "npcs", view: () => <NpcQuestTable focus={null} /> },
 };
 
@@ -82,7 +80,7 @@ export const WzWindow = memo(function WzWindow({ win, focused }: { win: Win; foc
     // Quest archives open on the quest browser, Etc.wz on the Commodity table, and _Canvas and Character files on their
     // thumbnails; the raw tree is one tab away.
     const mainLabel = mainLabelOf(file?.kind);
-    // Mob, Etc, Map, Item and Npc files (or their modular parts) also get the library's table for that data,
+    // Mob, Etc, Map and Npc files (or their modular parts) also get the library's table for that data,
     // browse-only or not.
     const tableTop = file ? tableTopOf(file) : null;
     const dataDefinition = tableTop ? DATA_VIEWS[tableTop] : undefined;

@@ -39,7 +39,7 @@ WzBrowser.exe [--port 5178] [--host 127.0.0.1] [--root FOLDER] [--read-only] [--
 Without a root, the web app can browse your whole disk to open files. With a root:
 - only `.wz` files inside that folder can be opened or saved to;
 - **Open file…** shows a searchable list of them;
-- files get a tab with a table of the whole library's data: Mobs on Mob, Mob Locations on Etc, Maps on Map, Items on Item and NPCs on Npc.
+- files get a tab with a table of the whole library's data: Mobs on Mob, Mob Locations on Etc, Maps on Map and NPCs on Npc.
 
 Without a root, those tables read the install the open file is in instead (its folder, or up to two folders up).
 

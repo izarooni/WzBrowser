@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using MapleLib.WzLib;
 using MapleLib.WzLib.WzProperties;
 
@@ -7,7 +8,8 @@ namespace WzBrowser.Api;
 /// <param name="Label">What the menu shows: the directory's name, or for the root the slot folder's (a modular
 /// part).</param>
 /// <param name="Count">How many items are in it and the directories below it; null for Item tabs that keep a hundred
-/// items to an .img, which would take reading each.</param>
+/// items to an .img, which take reading each and so are counted on their own
+/// (<see cref="WzService.CharacterSectionCount"/>).</param>
 public record CharacterSection(string Path, string Label, int? Count);
 
 /// <param name="Path">The .img, from the file root ("Weapon/01302000.img"). Its picture is fetched on its own
@@ -125,6 +127,47 @@ public sealed partial class WzService
     }
 
     /// <summary>
+    /// How many items each of Item's groups holds, so it's only read once. An edited group stays parsed, and is counted
+    /// as it is then.
+    /// </summary>
+    private static readonly ConditionalWeakTable<WzImage, StrongBox<int>> GroupCounts = [];
+
+    /// <summary>
+    /// How many items an Item section holds, reading its groups for it. The file is locked one .img at a time, so the
+    /// section's list and pictures aren't held up meanwhile.
+    /// </summary>
+    /// <param name="cancelled">The request was dropped (the view closed), so the rest isn't counted.</param>
+    public int CharacterSectionCount(string id, string? section, CancellationToken cancelled = default)
+    {
+        var entry = GetCharacter(id);
+        if (entry.Kind != "item") throw new InvalidDataException("This file isn't an Item file.");
+        List<WzImage> images;
+        lock (entry.Lock)
+            images = Images(SectionDirectory(entry, section), "").Select(found => found.Image).ToList();
+
+        var count = 0;
+        foreach (var image in images)
+        {
+            cancelled.ThrowIfCancellationRequested();
+            lock (entry.Lock)
+            {
+                // The file may have been edited between .imgs; one that was removed is just skipped.
+                if (image.Parent != null)
+                    count += IsItemImage(image) ? 1 : GroupCount(image);
+            }
+        }
+        return count;
+    }
+
+    private static int GroupCount(WzImage image)
+    {
+        if (image.Parsed) return CountItems(image);
+        return GroupCounts.GetValue(image, unread => new StrongBox<int>(WithParsed(unread, CountItems))).Value;
+    }
+
+    private static int CountItems(WzImage group) => NumberedChildren(group.WzProperties, "").Count;
+
+    /// <summary>
     /// The menu's name for the .imgs at a file's root: a modular part's slot folder (Data/Character/Weapon/Weapon_000.wz,
     /// Data/Item/Consume/Consume_000.wz), else "Body & head" for Character and "Root" for Item.
     /// </summary>
@@ -140,8 +183,8 @@ public sealed partial class WzService
     }
 
     /// <summary>
-    /// Skill's menu: a job's .img each (100.img), by job id, named by String's bookName for it ("Warrior Basics"), else
-    /// its id. Counts are left out: they'd take reading every job's .img.
+    /// Skill's menu: a job's .img each (100.img), by job id, named by its id and String's bookName for it
+    /// ("(100) Warrior Basics"), or just the id. Counts are left out: they'd take reading every job's .img.
     /// </summary>
     private List<CharacterSection> SkillSections(Entry entry)
     {
@@ -154,8 +197,15 @@ public sealed partial class WzService
         var books = SkillBookNames(entry, jobs.Select(job => job.Job));
         return jobs
             .OrderBy(job => job.Job)
-            .Select(job => new CharacterSection(job.Path, books.GetValueOrDefault(job.Job) ?? job.Job.ToString(), null))
+            .Select(job => new CharacterSection(job.Path, JobLabel(job.Path, books.GetValueOrDefault(job.Job)), null))
             .ToList();
+    }
+
+    /// <summary>"(100) Warrior Basics", with the job id as its .img writes it ("000" for beginners).</summary>
+    private static string JobLabel(string path, string? book)
+    {
+        var job = $"({System.IO.Path.GetFileNameWithoutExtension(path)})";
+        return book == null ? job : $"{job} {book}";
     }
 
     /// <summary>String's bookName for each job that has one ("Warrior Basics" for 100).</summary>
@@ -209,15 +259,17 @@ public sealed partial class WzService
         return WithParsed(job, image => NumberedChildren(image["skill"]?.WzProperties, skillsPath));
     }
 
+    private static WzDirectory SectionDirectory(Entry entry, string? section) => Resolve(entry.File, section) switch
+    {
+        WzFile file => file.WzDirectory,
+        WzDirectory folder => folder,
+        _ => throw new InvalidDataException("Not a folder of this file."),
+    };
+
     /// <summary>A Character or Item section's items: an .img each, or each item in Item's groups of a hundred.</summary>
     private static List<(string Path, int? Id)> ItemsIn(Entry entry, string? section)
     {
-        var directory = Resolve(entry.File, section) switch
-        {
-            WzFile file => file.WzDirectory,
-            WzDirectory folder => folder,
-            _ => throw new InvalidDataException("Not a folder of this file."),
-        };
+        var directory = SectionDirectory(entry, section);
         var prefix = Normalize(section) is { Length: > 0 } normalized ? normalized + "/" : "";
         var found = new List<(string Path, int? Id)>();
         foreach (var (image, path) in Images(directory, prefix))

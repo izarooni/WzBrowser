@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef, useState, type ReactNode, type RefObject, type SyntheticEvent } from "react";
 import type { GalleryItem } from "../lib/api";
 import { useConnection } from "../lib/connection";
+import { idOfPath } from "../lib/game-ids";
 import { useQueuedImage } from "../lib/image-queue";
 import { Photo } from "./icons";
 import { errorMessage } from "../lib/errors";
@@ -117,7 +118,9 @@ export const CanvasGallery = memo(function CanvasGallery({ fileId, revision, onO
     );
 });
 
-/** One picture with its label under it; `item.picture` null shows a placeholder. Double-click or Enter opens it. */
+/**
+ * One picture with its label and id under it; `item.picture` null shows a placeholder. Double-click or Enter opens it.
+ */
 export function Thumbnail({ item, box, url, selected, onSelect, onOpen }: {
     item: Omit<GalleryItem, "picture"> & { picture: string | null };
     box: number;
@@ -128,6 +131,9 @@ export function Thumbnail({ item, box, url, selected, onSelect, onOpen }: {
 }) {
     const ref = useRef<HTMLButtonElement>(null);
     const frame = useAnimation(ref, item.frames);
+    const id = idOfPath(item.path);
+    // A label that is the file's or node's own name already shows the id.
+    const showId = id != null && item.label !== id && item.label !== `${id}.img`;
     const picture = item.frames ? item.frames[frame].picture : item.picture;
 
     // Loaded through the queue, so a screenful of pictures doesn't hold up switching sections.
@@ -192,6 +198,11 @@ export function Thumbnail({ item, box, url, selected, onSelect, onOpen }: {
             <span className={`line-clamp-2 w-full break-all text-xs leading-tight ${selected ? "text-accent-800 dark:text-accent-200" : "text-zinc-700 dark:text-zinc-300"}`}>
                 {item.label}
             </span>
+            {showId && (
+                <span className="w-full break-all font-mono text-[10px] leading-tight tabular-nums text-zinc-500">
+                    {id}
+                </span>
+            )}
         </button>
     );
 }

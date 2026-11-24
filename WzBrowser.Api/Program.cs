@@ -136,7 +136,6 @@ api.MapGet("/health", (WzService wz, HttpContext ctx) => new
     mobs = wz.HasMobs,
     mobLocations = wz.HasMobLocations,
     maps = wz.HasMaps,
-    items = wz.HasItems,
     npcs = wz.HasNpcQuests,
 });
 
@@ -153,9 +152,6 @@ MapTablePicture("/mobs/{id:int}/sprite", (tables, id) => tables.MobSprite(id));
 // Every map with the mobs and NPCs its life places (and the mobs Etc lists there), with names.
 MapTable("/maps", tables => tables.Maps());
 MapTablePicture("/maps/{id:int}/minimap", (tables, id) => tables.MapMinimap(id));
-// Every item in one inventory tab (equip, use, setup, etc, cash) with its stats, String's name and description, and its icon.
-api.MapGet("/items/{category}", (string category, string? file, WzService wz) => wz.Tables(file).Items(category));
-MapTablePicture("/items/{id:int}/icon", (tables, id) => tables.ItemIcon(id));
 // The NPCs the library's quests start and end at, with the quests, and each NPC's sprite.
 MapTable("/npcs/quests", tables => tables.NpcQuests());
 MapTablePicture("/npcs/{id:int}/sprite", (tables, id) => tables.NpcSprite(id));
@@ -280,6 +276,9 @@ api.MapGet("/files/{id}/gallery", async (string id, HttpContext ctx, WzService w
 // String's names, which can be edited in String.
 api.MapGet("/files/{id}/character", (string id, WzService wz) => wz.CharacterSections(id));
 api.MapGet("/files/{id}/character/items", (string id, string? section, WzService wz) => wz.CharacterSectionItems(id, section));
+// How many items are in an Item section whose count the menu leaves out, since it takes reading them.
+api.MapGet("/files/{id}/character/count", (string id, string? section, HttpContext context, WzService wz) =>
+    wz.CharacterSectionCount(id, section, context.RequestAborted));
 // Each item's picture and info are fetched on their own, so a section lists at once and pictures load as they scroll in.
 api.MapGet("/files/{id}/character/picture", (string id, string path, HttpContext context, WzService wz) =>
     wz.CharacterPicture(id, path, context.RequestAborted) is { } png

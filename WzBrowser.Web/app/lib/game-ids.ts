@@ -3,6 +3,11 @@ export const mobId = (id: number) => String(id).padStart(7, "0");
 export const npcId = (id: number) => String(id).padStart(7, "0");
 export const mapId = (id: number) => String(id).padStart(9, "0");
 
+/** The id a path ends in, as the file writes it ("Weapon/01302000.img" -> "01302000"); shorter numbers are frames. */
+export function idOfPath(path: string) {
+    return /(?:^|\/)(\d{7,})(?:\.img)?$/.exec(path)?.[1] ?? null;
+}
+
 /** "Street : Map" -> its two halves; a name without a street is all map. */
 export function splitMapName(name: string | undefined): { street: string | null; map: string | null } {
     if (!name) return { street: null, map: null };
