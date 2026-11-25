@@ -1146,6 +1146,7 @@ export function MapCanvas({ fileId, path, mapIds, revision, onOpenRaw, onOpenMap
                         onPick={(item) => show(item.path)}
                         onSelect={setSelected}
                         onDelete={() => void removeSelected()}
+                        onReveal={onOpenRaw && ((item) => onOpenRaw(`${path}/${item.path}`))}
                     />
                 )}
                 {layout && tab === "check" && <ProblemList problems={problems} onPick={show} />}
@@ -1194,6 +1195,7 @@ export function MapCanvas({ fileId, path, mapIds, revision, onOpenRaw, onOpenMap
                             onRelink={() => void apply("Link footholds", relinkFootholds(layout))}
                             onMinimap={() => void redrawMinimap()}
                             onExport={() => void exportPicture()}
+                            onReveal={onOpenRaw && (() => onOpenRaw(path))}
                         />
                     )}
                 </div>

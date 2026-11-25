@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { OpenedFile } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { useActions, useWorkspaceData } from "../lib/workspace";
-import { ChevronDown, ChevronRight, Document, Download, XMark } from "./icons";
+import { ChevronDown, Document, Download, XMark } from "./icons";
 
 const ITEM = [
     "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left outline-none transition",
@@ -12,20 +12,15 @@ const ITEM = [
 const PANEL = "rounded-xl border border-zinc-200 bg-white p-1 text-[13px] shadow-lg dark:border-zinc-700 dark:bg-zinc-900";
 
 /**
- * The header's File menu: every open file; hovering one shows what can be done with it (save it to a new file, or
- * close it, which lets the server let go of it). Clicking a file brings its window to the front.
+ * The header's File menu: every open file, with buttons to save it to a new file or close it, which lets the server let
+ * go of it. Clicking a file brings its window to the front.
  */
 export function FileMenu() {
     const { files } = useWorkspaceData();
     const actions = useActions();
     const { status, readOnly } = useConnection();
     const [open, setOpen] = useState(false);
-    // The hovered file, and how far down the panel its row is: its menu is drawn beside the panel rather than inside
-    // the scrolling list, which would clip it.
-    const [active, setActive] = useState<{ id: string; top: number } | null>(null);
     const ref = useRef<HTMLDivElement>(null);
-    const panel = useRef<HTMLDivElement>(null);
-    const activeFile = active ? files[active.id] : undefined;
     const list = Object.values(files).sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
 
     useEffect(function closeWhenLeft() {
@@ -35,7 +30,7 @@ export function FileMenu() {
             if (!ref.current?.contains(event.target as Node)) setOpen(false);
         }
 
-        function escape(event: globalThis.KeyboardEvent) {
+        function escape(event: KeyboardEvent) {
             if (event.key === "Escape") setOpen(false);
         }
 
@@ -48,15 +43,6 @@ export function FileMenu() {
             removeEventListener("blur", away);
         };
     }, [open]);
-
-    useEffect(function forgetActive() {
-        if (!open) setActive(null);
-    }, [open]);
-
-    function hover(id: string, row: HTMLElement) {
-        const top = row.getBoundingClientRect().top - (panel.current?.getBoundingClientRect().top ?? 0);
-        setActive({ id, top });
-    }
 
     function run(action: () => void) {
         setOpen(false);
@@ -83,7 +69,6 @@ export function FileMenu() {
             </button>
             {open && (
                 <div
-                    ref={panel}
                     role="menu"
                     aria-label="Open files"
                     className={`absolute left-0 top-full z-50 mt-1.5 w-72 ${PANEL}`}
@@ -91,26 +76,18 @@ export function FileMenu() {
                     <p className="px-2.5 pb-1 pt-1.5 text-xs font-medium text-zinc-400">
                         {list.length ? `Open files (${list.length})` : "No files open"}
                     </p>
-                    <ul className="max-h-[70vh] overflow-y-auto" onScroll={() => setActive(null)}>
+                    <ul className="max-h-[70vh] overflow-y-auto">
                         {list.map((file) => (
                             <FileRow
                                 key={file.id}
                                 file={file}
-                                active={active?.id === file.id}
-                                onHover={(row) => hover(file.id, row)}
+                                readOnly={readOnly}
                                 onShow={() => run(() => actions.showWindow(file.id))}
+                                onSave={() => run(() => void actions.save(file.id))}
+                                onClose={() => run(() => void actions.closeWindow(file.id))}
                             />
                         ))}
                     </ul>
-                    {activeFile && active && (
-                        <FileActions
-                            file={activeFile}
-                            top={active.top}
-                            readOnly={readOnly}
-                            onSave={() => run(() => void actions.save(activeFile.id))}
-                            onClose={() => run(() => void actions.closeWindow(activeFile.id))}
-                        />
-                    )}
                     {list.length === 0 && (
                         <button type="button" role="menuitem" className={ITEM} onClick={() => run(actions.openPicker)}>
                             Open file…
@@ -122,88 +99,52 @@ export function FileMenu() {
     );
 }
 
-/** One open file; hovering or focusing it shows its menu beside the list. */
-function FileRow({ file, active, onHover, onShow }: {
+/** One open file, with what can be done with it on the right. */
+function FileRow({ file, readOnly, onShow, onSave, onClose }: {
     file: OpenedFile;
-    active: boolean;
-    onHover: (row: HTMLElement) => void;
-    onShow: () => void;
-}) {
-    function openActions(event: KeyboardEvent<HTMLButtonElement>) {
-        if (event.key !== "ArrowRight") return;
-        event.preventDefault();
-        const row = event.currentTarget;
-        onHover(row);
-        const menu = () => row.closest("[role=menu]")?.querySelector<HTMLElement>(
-            "[data-file-actions] [role=menuitem]:not([disabled])",
-        );
-        requestAnimationFrame(() => menu()?.focus());
-    }
-
-    return (
-        <li>
-            <button
-                type="button"
-                role="menuitem"
-                aria-haspopup="menu"
-                aria-expanded={active}
-                title={`${file.path}
-
-Click to bring its window to the front`}
-                onMouseEnter={(event) => onHover(event.currentTarget)}
-                onFocus={(event) => onHover(event.currentTarget)}
-                onClick={onShow}
-                onKeyDown={openActions}
-                className={`${ITEM} text-zinc-700 dark:text-zinc-200 ${active ? "bg-zinc-100 dark:bg-zinc-800" : ""}`}
-            >
-                <Document className="size-4 shrink-0 text-zinc-400" />
-                <span className="min-w-0 flex-1 truncate">{file.name}</span>
-                {file.dirty && <span title="Unsaved changes" className="size-2 shrink-0 rounded-full bg-amber-500" />}
-                <ChevronRight className="size-3.5 shrink-0 text-zinc-400" />
-            </button>
-        </li>
-    );
-}
-
-/** What can be done with an open file: save it to a new file, or close it so the server lets go of it. */
-function FileActions({ file, top, readOnly, onSave, onClose }: {
-    file: OpenedFile;
-    top: number;
     readOnly: boolean;
+    onShow: () => void;
     onSave: () => void;
     onClose: () => void;
 }) {
     return (
-        // Overlaps the list by a little, so the pointer can cross to it without leaving both.
-        <div data-file-actions style={{ top: top - 5 }} className="absolute left-full -ml-1 pl-1">
-            <div role="menu" aria-label={file.name} className={`w-56 ${PANEL}`}>
-                <p className="truncate px-2.5 pb-1 pt-1.5 font-mono text-[11px] text-zinc-400" title={file.path}>
-                    {file.path}
-                </p>
-                {!readOnly && (
-                    <button
-                        type="button"
-                        role="menuitem"
-                        disabled={!file.dirty}
-                        title={file.dirty ? "Writes the changes to a new file; the original is untouched" : "Nothing to save"}
-                        onClick={onSave}
-                        className={`${ITEM} text-zinc-700 dark:text-zinc-200`}
-                    >
-                        <Download className="size-4 shrink-0 text-zinc-400" />
-                        Save
-                    </button>
-                )}
+        <li role="none" className="flex items-center gap-0.5">
+            <button
+                type="button"
+                role="menuitem"
+                title={`${file.path}
+
+Click to bring its window to the front`}
+                onClick={onShow}
+                className={`${ITEM} min-w-0 flex-1 text-zinc-700 dark:text-zinc-200`}
+            >
+                <Document className="size-4 shrink-0 text-zinc-400" />
+                <span className="min-w-0 flex-1 truncate">{file.name}</span>
+                {file.dirty && <span title="Unsaved changes" className="size-2 shrink-0 rounded-full bg-amber-500" />}
+            </button>
+            {!readOnly && (
                 <button
                     type="button"
                     role="menuitem"
-                    title="Closes its window and lets the server let go of the file"
-                    onClick={onClose}
-                    className={`${ITEM} text-rose-600 dark:text-rose-400`}
+                    disabled={!file.dirty}
+                    aria-label={`Save ${file.name}`}
+                    title={file.dirty ? "Save: writes the changes to a new file; the original is untouched" : "Nothing to save"}
+                    onClick={onSave}
+                    className="btn-icon shrink-0 disabled:opacity-40"
                 >
-                    <XMark className="size-4 shrink-0" />
-                    Close and release
+                    <Download className="size-4" />
                 </button>
-            </div>
-        </div>
+            )}
+            <button
+                type="button"
+                role="menuitem"
+                aria-label={`Close and release ${file.name}`}
+                title="Close and release: closes its window and lets the server let go of the file"
+                onClick={onClose}
+                className="btn-icon shrink-0 hover:bg-rose-100 hover:text-rose-700 dark:hover:bg-rose-500/20"
+            >
+                <XMark className="size-4" />
+            </button>
+        </li>
     );
 }

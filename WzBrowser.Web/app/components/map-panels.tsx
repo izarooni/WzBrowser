@@ -4,6 +4,7 @@ import { useConnection } from "../lib/connection";
 import { platformOf, type Problem } from "../lib/map-edits";
 import type { Box, Camera, Point } from "../lib/map-scene";
 import { FieldLimitEditor } from "./field-limit-editor";
+import { Archive } from "./icons";
 import { PORTAL_TYPES } from "./map-palette";
 import { InlineEdit } from "./node-tree";
 import { isDeleteKey, PropertyRow } from "./property-row";
@@ -208,12 +209,14 @@ export function usePagedList() {
  * selects everything from the last one clicked, and both together add that to what's selected. Delete or Backspace on a selected
  * one deletes what's selected.
  */
-export function ItemList({ layout, selected, onPick, onSelect, onDelete }: {
+export function ItemList({ layout, selected, onPick, onSelect, onDelete, onReveal }: {
     layout: MapLayout;
     selected: ReadonlySet<string>;
     onPick: (item: MapItem) => void;
     onSelect: (paths: Set<string>) => void;
     onDelete: () => void;
+    /** Shows one in the raw tree. Left out when there's no raw tree. */
+    onReveal?: (item: MapItem) => void;
 }) {
     const [filter, setFilter] = useState("");
     /** The path of the last one clicked without Shift, where a range starts. */
@@ -278,18 +281,32 @@ export function ItemList({ layout, selected, onPick, onSelect, onDelete }: {
             </div>
             <ul className="min-h-0 flex-1 overflow-auto" onScroll={showMore}>
                 {matching.slice(0, limit).map((item) => (
-                    <li key={item.path}>
+                    <li
+                        key={item.path}
+                        className={`flex items-center ${selected.has(item.path)
+                            ? "bg-accent-50 text-accent-700 dark:bg-accent-600/15 dark:text-accent-200"
+                            : "hover:bg-zinc-100 dark:hover:bg-zinc-800"}`}
+                    >
                         <button
                             type="button"
                             onClick={(event) => handleClick(event, item)}
                             onKeyDown={(event) => handleKey(event, item)}
-                            className={`w-full select-none px-3 py-1 text-left text-xs ${selected.has(item.path)
-                                ? "bg-accent-50 text-accent-700 dark:bg-accent-600/15 dark:text-accent-200"
-                                : "hover:bg-zinc-100 dark:hover:bg-zinc-800"}`}
+                            className="min-w-0 flex-1 select-none px-3 py-1 text-left text-xs"
                         >
                             <span className="block truncate font-mono">{item.path}</span>
                             <span className="block truncate text-[11px] text-zinc-500">{item.sprite ?? item.kind}</span>
                         </button>
+                        {onReveal && (
+                            <button
+                                type="button"
+                                onClick={() => onReveal(item)}
+                                aria-label={`Find ${item.path} in raw tree`}
+                                title="Find in raw tree"
+                                className="btn-icon mr-1 shrink-0"
+                            >
+                                <Archive className="size-3.5" />
+                            </button>
+                        )}
                     </li>
                 ))}
             </ul>
@@ -329,7 +346,9 @@ const MAP_OPTIONAL: Record<string, string> = {
 };
 
 /** The map's own values, music and minimap. The music only plays when it's asked to. */
-export function MapPanel({ fileId, layout, readOnly, disabled, onSet, onDeleteValue, onRelink, onMinimap, onExport }: {
+export function MapPanel({
+    fileId, layout, readOnly, disabled, onSet, onDeleteValue, onRelink, onMinimap, onExport, onReveal,
+}: {
     fileId: string;
     layout: MapLayout;
     readOnly: boolean;
@@ -339,6 +358,8 @@ export function MapPanel({ fileId, layout, readOnly, disabled, onSet, onDeleteVa
     onRelink: () => void;
     onMinimap: () => void;
     onExport: () => void;
+    /** Shows the map in the raw tree. Left out when there's no raw tree. */
+    onReveal?: () => void;
 }) {
     const { api } = useConnection();
     const { info } = layout;
@@ -375,6 +396,9 @@ export function MapPanel({ fileId, layout, readOnly, disabled, onSet, onDeleteVa
                 <button type="button" onClick={onExport} title="Saves what's shown as a picture" className={SMALL_BUTTON}>
                     Export PNG
                 </button>
+                {onReveal && (
+                    <button type="button" onClick={onReveal} className={SMALL_BUTTON}>Find in raw tree</button>
+                )}
             </div>
             <ul className={VALUE_LIST}>
                 {Object.entries(info).map(([name, value]) => (
