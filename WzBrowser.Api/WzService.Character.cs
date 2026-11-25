@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using MapleLib.WzLib;
 using MapleLib.WzLib.WzProperties;
 
@@ -7,9 +6,8 @@ namespace WzBrowser.Api;
 /// <param name="Path">The directory in the file ("Weapon"), or "" for the .imgs at the root.</param>
 /// <param name="Label">What the menu shows: the directory's name, or for the root the slot folder's (a modular
 /// part).</param>
-/// <param name="Count">How many items are in it and the directories below it; null for Item tabs that keep a hundred
-/// items to an .img, which take reading each and so are counted on their own
-/// (<see cref="WzService.CharacterSectionCount"/>).</param>
+/// <param name="Count">How many items are in it and the directories below it; null for Item and Skill, where counting
+/// would mean reading each .img.</param>
 public record CharacterSection(string Path, string Label, int? Count);
 
 /// <param name="Path">The .img, from the file root ("Weapon/01302000.img"). Its picture is fetched on its own
@@ -86,8 +84,8 @@ public sealed partial class WzService
 
     /// <summary>
     /// The menu: each directory at the root (Weapon, Cap, Coat, ... or Consume, Etc, Cash, ...), and the root itself when
-    /// it holds .imgs. Character's counts are its .imgs. Item's are left out where they'd mean reading every .img for its
-    /// items, so listing the menu reads nothing. Skill's menu is its jobs (see <see cref="SkillSections"/>).
+    /// it holds .imgs. Character's counts are its .imgs. Item's are left out, so listing the menu reads nothing.
+    /// Skill's menu is its jobs (see <see cref="SkillSections"/>).
     /// </summary>
     public List<CharacterSection> CharacterSections(string id)
     {
@@ -103,7 +101,7 @@ public sealed partial class WzService
                 .ToList();
             if (root.WzImages.Count > 0)
             {
-                var count = ItemCount(isItemFile, root.WzImages);
+                int? count = isItemFile ? null : root.WzImages.Count;
                 sections.Insert(0, new CharacterSection("", RootLabel(entry, isItemFile), count));
             }
             return sections;
@@ -112,60 +110,9 @@ public sealed partial class WzService
 
     private static CharacterSection DirectorySection(WzDirectory directory, bool isItemFile)
     {
-        var count = ItemCount(isItemFile, Images(directory, "").Select(found => found.Image));
+        int? count = isItemFile ? null : Images(directory, "").Count();
         return new CharacterSection(directory.Name, directory.Name, count);
     }
-
-    /// <summary>
-    /// How many items some .imgs hold: one each, except Item's groups of a hundred, left uncounted (null).
-    /// </summary>
-    private static int? ItemCount(bool isItemFile, IEnumerable<WzImage> images)
-    {
-        var list = images.ToList();
-        if (isItemFile && !list.All(IsItemImage)) return null;
-        return list.Count;
-    }
-
-    /// <summary>
-    /// How many items each of Item's groups holds, so it's only read once. An edited group stays parsed, and is counted
-    /// as it is then.
-    /// </summary>
-    private static readonly ConditionalWeakTable<WzImage, StrongBox<int>> GroupCounts = [];
-
-    /// <summary>
-    /// How many items an Item section holds, reading its groups for it. The file is locked one .img at a time, so the
-    /// section's list and pictures aren't held up meanwhile.
-    /// </summary>
-    /// <param name="cancelled">The request was dropped (the view closed), so the rest isn't counted.</param>
-    public int CharacterSectionCount(string id, string? section, CancellationToken cancelled = default)
-    {
-        var entry = GetCharacter(id);
-        if (entry.Kind != "item") throw new InvalidDataException("This file isn't an Item file.");
-        List<WzImage> images;
-        lock (entry.Lock)
-            images = Images(SectionDirectory(entry, section), "").Select(found => found.Image).ToList();
-
-        var count = 0;
-        foreach (var image in images)
-        {
-            cancelled.ThrowIfCancellationRequested();
-            lock (entry.Lock)
-            {
-                // The file may have been edited between .imgs; one that was removed is just skipped.
-                if (image.Parent != null)
-                    count += IsItemImage(image) ? 1 : GroupCount(image);
-            }
-        }
-        return count;
-    }
-
-    private static int GroupCount(WzImage image)
-    {
-        if (image.Parsed) return CountItems(image);
-        return GroupCounts.GetValue(image, unread => new StrongBox<int>(WithParsed(unread, CountItems))).Value;
-    }
-
-    private static int CountItems(WzImage group) => NumberedChildren(group.WzProperties, "").Count;
 
     /// <summary>
     /// The menu's name for the .imgs at a file's root: a modular part's slot folder (Data/Character/Weapon/Weapon_000.wz,

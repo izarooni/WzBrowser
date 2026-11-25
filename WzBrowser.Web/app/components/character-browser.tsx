@@ -91,8 +91,6 @@ export const CharacterBrowser = memo(function CharacterBrowser({ fileId, kind, r
     const { api, status } = useConnection();
     const { files } = useWorkspaceData();
     const [sections, setSections] = useState<CharacterSection[] | null>(null);
-    // Item's counts that take reading the section, by path, as they come in.
-    const [counts, setCounts] = useState<Record<string, number>>({});
     const [section, setSection] = useState<string | null>(null);
     const [listing, setListing] = useState<Listing | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -124,27 +122,6 @@ export const CharacterBrowser = memo(function CharacterBrowser({ fileId, kind, r
         api.characterSections(fileId).then(showSections, showError);
         return () => { cancelled = true; };
     }, [api, status, fileId, kind, revision]);
-
-    useEffect(function loadCounts() {
-        if (status !== "online" || kind !== "item" || !sections) return;
-        const aborter = new AbortController();
-
-        async function countSections(uncounted: CharacterSection[]) {
-            for (const { path } of uncounted) {
-                try {
-                    const count = await api.characterCount(fileId, path, aborter.signal);
-                    if (aborter.signal.aborted) return;
-                    setCounts((previous) => ({ ...previous, [path]: count }));
-                } catch {
-                    // The menu just goes without this number.
-                    if (aborter.signal.aborted) return;
-                }
-            }
-        }
-
-        void countSections(sections.filter((entry) => entry.count == null));
-        return () => aborter.abort();
-    }, [api, status, fileId, kind, sections]);
 
     useEffect(function loadItems() {
         if (status !== "online" || section == null) return;
@@ -195,7 +172,6 @@ export const CharacterBrowser = memo(function CharacterBrowser({ fileId, kind, r
         <div className="flex min-h-0 flex-1">
             <SectionMenu
                 sections={sections}
-                counts={counts}
                 section={section}
                 error={error}
                 width={menuPane.width}
@@ -304,10 +280,8 @@ function itemCountText(shown: CharacterItem[] | null, items: CharacterItem[] | n
     return `${shown.length.toLocaleString()} of ${items.length.toLocaleString()} ${noun}`;
 }
 
-function SectionMenu({ sections, counts, section, error, width, onPick }: {
+function SectionMenu({ sections, section, error, width, onPick }: {
     sections: CharacterSection[] | null;
-    /** Counts that aren't in `sections`, by path. */
-    counts: Record<string, number>;
     section: string | null;
     error: string | null;
     width: number;
@@ -326,7 +300,6 @@ function SectionMenu({ sections, counts, section, error, width, onPick }: {
             {sections?.length === 0 && <p className="px-3 py-2 text-xs text-zinc-500">This file has no folders.</p>}
             {sections?.map((entry) => {
                 const active = entry.path === section;
-                const count = entry.count ?? counts[entry.path];
                 return (
                     <button
                         key={entry.path}
@@ -337,9 +310,9 @@ function SectionMenu({ sections, counts, section, error, width, onPick }: {
                         className={`${SECTION_BUTTON} ${active ? SECTION_ACTIVE : SECTION_IDLE}`}
                     >
                         <span className="min-w-0 flex-1 truncate">{entry.label}</span>
-                        {count != null && (
+                        {entry.count != null && (
                             <span className="shrink-0 text-[11px] tabular-nums text-zinc-400">
-                                {count.toLocaleString()}
+                                {entry.count.toLocaleString()}
                             </span>
                         )}
                     </button>

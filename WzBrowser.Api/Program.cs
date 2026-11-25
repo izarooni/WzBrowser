@@ -271,9 +271,6 @@ api.MapGet("/files/{id}/gallery", async (string id, HttpContext ctx, WzService w
 // String's names, which can be edited in String.
 api.MapGet("/files/{id}/character", (string id, WzService wz) => wz.CharacterSections(id));
 api.MapGet("/files/{id}/character/items", (string id, string? section, WzService wz) => wz.CharacterSectionItems(id, section));
-// How many items are in an Item section whose count the menu leaves out, since it takes reading them.
-api.MapGet("/files/{id}/character/count", (string id, string? section, HttpContext context, WzService wz) =>
-    wz.CharacterSectionCount(id, section, context.RequestAborted));
 // Each item's picture and info are fetched on their own, so a section lists at once and pictures load as they scroll in.
 api.MapGet("/files/{id}/character/picture", (string id, string path, HttpContext context, WzService wz) =>
     wz.CharacterPicture(id, path, context.RequestAborted) is { } png

@@ -60,7 +60,7 @@ export interface GalleryItem {
 
 /**
  * One entry of a Character or Item file's menu: a root directory ("Weapon", "Consume"), or "" for the .imgs at the root.
- * `count` is null for Item tabs that keep a hundred items to an .img, which `characterCount` reads to count.
+ * `count` is null for Item and Skill, where counting would mean reading each .img.
  */
 export interface CharacterSection { path: string; label: string; count: number | null }
 
@@ -419,9 +419,6 @@ export function createApi(base: string) {
          * or a job's .img each.
          */
         characterSections: (id: string) => request<CharacterSection[]>(`/api/files/${id}/character`),
-        /** How many items are in an Item section whose `count` is null. */
-        characterCount: (id: string, section: string, signal: AbortSignal) =>
-            request<number>(`/api/files/${id}/character/count?section=${q(section)}`, { signal }),
         /** One section's items with String's names. */
         characterItems: (id: string, section: string) =>
             request<CharacterItems>(`/api/files/${id}/character/items?section=${q(section)}`),
