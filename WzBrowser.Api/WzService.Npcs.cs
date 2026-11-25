@@ -65,8 +65,7 @@ public sealed partial class WzService
     /// <summary>The NPC's standing sprite, following info/link to the NPC it borrows its look from.</summary>
     public byte[]? NpcSprite(int id)
     {
-        // The Maps tab shows NPCs too, so a library without quests still has them.
-        if ((FirstQuestArchive() ?? MapAnchor()) is not { } archive) return null;
+        if (FirstQuestArchive() is not { } archive) return null;
         for (var hops = 0; hops < 4; hops++)
         {
             var loc = LocateNear(archive, "npc", id);

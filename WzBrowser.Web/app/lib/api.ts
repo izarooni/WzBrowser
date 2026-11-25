@@ -196,12 +196,8 @@ export interface MobLocation { id: number; name: string | null; maps: number[]; 
 /** `mapNames`: map id -> "Street : Map" for every map listed. */
 export interface MobLocations { mobs: MobLocation[]; mapNames: Record<string, string> }
 
-/** A mob in a map: `count` spawn points in its life, or 0 when only Etc's MobLocation.img lists it there. */
-export interface MapMob { id: number; count: number }
-/** A map with the mobs that spawn in it and the NPCs standing in it. `name` is "Street : Map". */
-export interface MapInfo { id: number; name: string | null; mobs: MapMob[]; npcs: number[] }
-/** `mobNames`/`npcNames`: id -> name for every mob and NPC in any map. */
-export interface Maps { maps: MapInfo[]; mobNames: Record<string, string>; npcNames: Record<string, string> }
+/** A map with the NPCs standing in it. `name` is "Street : Map". */
+export interface MapNpcs { id: number; name: string | null; npcs: number[] }
 
 /** A quest an NPC hands out (`starts`) and/or completes (`ends`). `archive` is the quest archive's library name. */
 export interface NpcQuest { id: number; name: string; archive: string; starts: boolean; ends: boolean }
@@ -406,8 +402,8 @@ export function createApi(base: string) {
         /** Every mob with the maps it spawns in, ordered by mob id. */
         mobLocations: (file?: Scope) => request<MobLocations>(`/api/mobs/locations${scope(file)}`),
         mobSpriteUrl: (id: number, file?: Scope) => `${base}/api/mobs/${id}/sprite${scope(file)}`,
-        /** Every map with its mobs and NPCs, ordered by map id. */
-        maps: (file?: Scope) => request<Maps>(`/api/maps${scope(file)}`),
+        /** Every map with NPCs in it, ordered by map id. */
+        maps: (file?: Scope) => request<MapNpcs[]>(`/api/maps${scope(file)}`),
         mapMinimapUrl: (id: number, file?: Scope) => `${base}/api/maps/${id}/minimap${scope(file)}`,
         /** Every NPC the library's quests start or end at, ordered by NPC id. */
         npcQuests: (file?: Scope) => request<NpcQuests[]>(`/api/npcs/quests${scope(file)}`),

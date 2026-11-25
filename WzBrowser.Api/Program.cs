@@ -144,7 +144,7 @@ MapTable("/mobs", tables => tables.Mobs());
 // Etc's MobLocation.img: each mob and the maps it spawns in, with names, the mob's sprite and the maps' minimaps.
 MapTable("/mobs/locations", tables => tables.MobLocations());
 MapTablePicture("/mobs/{id:int}/sprite", (tables, id) => tables.MobSprite(id));
-// Every map with the mobs and NPCs its life places (and the mobs Etc lists there), with names.
+// Every map with the NPCs its life places, with its name, and the maps' minimaps.
 MapTable("/maps", tables => tables.Maps());
 MapTablePicture("/maps/{id:int}/minimap", (tables, id) => tables.MapMinimap(id));
 // The NPCs the library's quests start and end at, with the quests, and each NPC's sprite.

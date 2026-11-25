@@ -16,7 +16,7 @@ export function LibraryScopeProvider({ fileId, children }: { fileId: string; chi
  * The classic files that get a library table as a tab (lowercase), by the classic file they are or are part of. Keep
  * in step with the server's TableTops, which lets a browse-only server open these files.
  */
-export const TABLE_TOPS = ["mob", "etc", "map", "npc"] as const;
+export const TABLE_TOPS = ["mob", "etc", "npc"] as const;
 
 export type TableTop = (typeof TABLE_TOPS)[number];
 

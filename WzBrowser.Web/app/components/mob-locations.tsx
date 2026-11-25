@@ -13,11 +13,9 @@ const PAGE = 150;
 const PREVIEW_MAPS = 6;
 
 /** Every mob with the maps it spawns in: its sprite, and each map's name and minimap. */
-export const MobLocationTable = memo(function MobLocationTable({ focus, onShowMap }: {
+export const MobLocationTable = memo(function MobLocationTable({ focus }: {
     /** The mob another tab asked to show: it's opened and scrolled to. */
     focus: Focus | null;
-    /** Shows the map in the Maps tab; without it the maps aren't links. */
-    onShowMap?: (id: number) => void;
 }) {
     const { status } = useConnection();
     const api = useLibraryApi();
@@ -179,7 +177,7 @@ export const MobLocationTable = memo(function MobLocationTable({ focus, onShowMa
                                 </button>
                                 {expanded && (
                                     <ul className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-3 px-4 pb-4 sm:pl-[6.5rem] sm:pr-6">
-                                        {maps.map((m) => <MapCard key={m} id={m} name={mapName(m)} highlight={hits?.has(m) ?? false} onShow={onShowMap} />)}
+                                        {maps.map((m) => <MapCard key={m} id={m} name={mapName(m)} highlight={hits?.has(m) ?? false} />)}
                                     </ul>
                                 )}
                             </li>
@@ -202,13 +200,14 @@ export const MobLocationTable = memo(function MobLocationTable({ focus, onShowMa
     );
 });
 
-/** A map with its minimap and name; a link to the map's page in the Maps tab when `onShow` is given. */
-export function MapCard({ id, name, highlight, onShow }: { id: number; name: string | undefined; highlight: boolean; onShow?: (id: number) => void }) {
+/** A map with its minimap and name. */
+export function MapCard({ id, name, highlight }: { id: number; name: string | undefined; highlight: boolean }) {
     const api = useLibraryApi();
     const [hasMinimap, setHasMinimap] = useState(true);
     const { street, map } = splitMapName(name);
-    const body = (
-        <>
+    const border = highlight ? "border-accent-400 dark:border-accent-500/60" : "border-zinc-200 dark:border-zinc-800";
+    return (
+        <li className={`overflow-hidden rounded-xl border bg-white transition dark:bg-zinc-900 ${border}`}>
             <div className="grid h-28 place-items-center bg-zinc-50 dark:bg-zinc-950/40">
                 {hasMinimap
                     ? <img src={api.mapMinimapUrl(id)} alt="" loading="lazy" className="max-h-28 max-w-full object-contain" onError={() => setHasMinimap(false)} />
@@ -221,13 +220,6 @@ export function MapCard({ id, name, highlight, onShow }: { id: number; name: str
                     <span className="ml-auto shrink-0 font-mono tabular-nums">{mapId(id)}</span>
                 </p>
             </div>
-        </>
-    );
-    return (
-        <li className={`overflow-hidden rounded-xl border bg-white transition dark:bg-zinc-900 ${highlight ? "border-accent-400 dark:border-accent-500/60" : "border-zinc-200 dark:border-zinc-800"} ${onShow ? "hover:border-accent-400 dark:hover:border-accent-500/60" : ""}`}>
-            {onShow
-                ? <button type="button" onClick={() => onShow(id)} title="Show this map's mobs and NPCs" className="block w-full text-left">{body}</button>
-                : body}
         </li>
     );
 }

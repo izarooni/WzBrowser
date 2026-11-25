@@ -2,24 +2,16 @@ using MapleLib.WzLib;
 
 namespace WzBrowser.Api;
 
-/// <param name="Count">How many spawn points the map's life has for the mob; 0 when only Etc's MobLocation.img lists it there.</param>
-public record MapMobDto(int Id, int Count);
-
 /// <param name="Name">"Street : Map" from String.</param>
-/// <param name="Mobs">The mobs that spawn in the map, in the order its life places them, then any only Etc lists.</param>
 /// <param name="Npcs">The NPCs standing in the map (its life's NPCs that aren't hidden), in the order it places them.</param>
-public record MapDto(int Id, string? Name, List<MapMobDto> Mobs, List<int> Npcs);
-
-/// <param name="MobNames">Mob id -> String's name, for every mob in any map.</param>
-/// <param name="NpcNames">NPC id -> String's name, for every NPC in any map.</param>
-public record MapsDto(List<MapDto> Maps, Dictionary<int, string> MobNames, Dictionary<int, string> NpcNames);
+public record MapDto(int Id, string? Name, List<int> Npcs);
 
 public sealed partial class WzService
 {
     /// <summary>What each map's life places: mob id -> spawn points, and the NPCs. Read once; null until first asked for.</summary>
     private Dictionary<int, MapLife>? _mapLife;
-    /// <summary>Every map with its mobs and NPCs and their names, read once. Null until first asked for.</summary>
-    private MapsDto? _maps;
+    /// <summary>Every map with NPCs in it, read once. Null until first asked for.</summary>
+    private List<MapDto>? _maps;
     /// <summary>The library's first String part, the anchor when there's neither MobLocation.img nor a quest archive; "" once looked for and not found.</summary>
     private string? _stringAnchor;
     /// <summary>Taken after <see cref="_mobsLock"/> when both are held, never before it.</summary>
@@ -30,42 +22,26 @@ public sealed partial class WzService
     /// <summary>True when the library has Map files next to its Etc, quest archives or String (cheap after the first call).</summary>
     public bool HasMaps => Root != null && MapAnchor() is { } anchor && WzLayout.Find(anchor, "Map", "Map/Map1") != null;
 
-    /// <summary>
-    /// Every map in the library's Map files (plus any Etc's MobLocation.img lists a mob in), with the mobs and NPCs its life
-    /// places and String's names, sorted by id.
-    /// </summary>
-    public MapsDto Maps()
+    /// <summary>Every map in the library's Map files whose life places an NPC, with String's names, sorted by id.</summary>
+    public List<MapDto> Maps()
     {
         if (Root == null) throw new InvalidDataException("This server isn't pinned to a folder.");
-        // Etc's lists and the anchor first: they take the mob lock, which is never taken inside this one.
-        var listed = HasMobLocations ? MobLocations() : null;
+        // The anchor first: it takes the mob lock, which is never taken inside this one.
         var anchor = MapAnchor();
         var lives = MapLives();
         lock (_mapsLock)
         {
             if (_maps != null) return _maps;
 
-            var maps = lives.ToDictionary(kv => kv.Key, kv => (Mobs: kv.Value.Mobs.Select(m => new MapMobDto(m.Key, m.Value)).ToList(), kv.Value.Npcs));
-            // Etc can list a mob in a map whose life doesn't place it (one a script or reactor summons).
-            foreach (var mob in listed?.Mobs ?? [])
-                foreach (var id in mob.Maps)
-                {
-                    if (!maps.TryGetValue(id, out var map)) maps[id] = map = (new List<MapMobDto>(), new List<int>());
-                    if (!map.Mobs.Exists(m => m.Id == mob.Id)) map.Mobs.Add(new MapMobDto(mob.Id, 0));
-                }
-
-            Dictionary<int, string> mapNames = [], mobNames = [], npcNames = [];
+            var maps = lives.Where(life => life.Value.Npcs.Count > 0).ToList();
+            Dictionary<int, string> names = [];
             if (anchor != null)
-                using (var names = new NameIndex(anchor, InRoot))
-                {
-                    mapNames = names.Resolve("map", maps.Keys);
-                    mobNames = names.Resolve("mob", maps.Values.SelectMany(m => m.Mobs).Select(m => m.Id).Distinct());
-                    npcNames = names.Resolve("npc", maps.Values.SelectMany(m => m.Npcs).Distinct());
-                }
-            var list = maps.OrderBy(kv => kv.Key)
-                .Select(kv => new MapDto(kv.Key, mapNames.GetValueOrDefault(kv.Key), kv.Value.Mobs, kv.Value.Npcs))
+                using (var index = new NameIndex(anchor, InRoot))
+                    names = index.Resolve("map", maps.Select(map => map.Key));
+            return _maps = maps
+                .OrderBy(map => map.Key)
+                .Select(map => new MapDto(map.Key, names.GetValueOrDefault(map.Key), map.Value.Npcs))
                 .ToList();
-            return _maps = new MapsDto(list, mobNames, npcNames);
         }
     }
 

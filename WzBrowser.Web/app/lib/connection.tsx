@@ -32,7 +32,7 @@ interface Connection {
     mobs: boolean;
     /** The library has Etc's MobLocation.img to show (a pinned server only). */
     mobLocations: boolean;
-    /** The library has Map files, so its maps' mobs and NPCs can be listed (a pinned server only). */
+    /** The library has Map files, so the maps its NPCs stand in can be listed (a pinned server only). */
     maps: boolean;
     /** The library has a quest archive, so its NPCs' quests can be listed (a pinned server only). */
     npcs: boolean;

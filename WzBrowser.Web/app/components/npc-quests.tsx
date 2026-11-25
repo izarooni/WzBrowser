@@ -20,13 +20,11 @@ const QUEST_BUTTON = [
 ].join(" ");
 
 /** Every NPC a quest starts or ends at: its sprite, the quests, each a link to that quest's page, and the maps it stands in. */
-export const NpcQuestTable = memo(function NpcQuestTable({ onOpenQuest, focus, onShowMap }: {
+export const NpcQuestTable = memo(function NpcQuestTable({ onOpenQuest, focus }: {
     /** Shows the quest in its archive's tab; without it the quests aren't links. */
     onOpenQuest?: (archive: string, quest: number) => void;
     /** The NPC another tab asked to show: it's opened and scrolled to. */
     focus: Focus | null;
-    /** Shows the map in the Maps tab; without it the maps aren't links. */
-    onShowMap?: (id: number) => void;
 }) {
     const { status, library, maps } = useConnection();
     const api = useLibraryApi();
@@ -60,7 +58,7 @@ export const NpcQuestTable = memo(function NpcQuestTable({ onOpenQuest, focus, o
         api.maps().then((d) => {
             if (cancelled) return;
             const maps = new Map<number, number[]>(), names = new Map<number, string>();
-            for (const map of d.maps) {
+            for (const map of d) {
                 if (map.name) names.set(map.id, map.name);
                 for (const n of map.npcs) {
                     const list = maps.get(n);
@@ -225,7 +223,7 @@ export const NpcQuestTable = memo(function NpcQuestTable({ onOpenQuest, focus, o
                                                 {maps.length > 0
                                                     ? (
                                                         <ul className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-3">
-                                                            {maps.map((m) => <MapCard key={m} id={m} name={npcMaps.names.get(m)} highlight={false} onShow={onShowMap} />)}
+                                                            {maps.map((m) => <MapCard key={m} id={m} name={npcMaps.names.get(m)} highlight={false} />)}
                                                         </ul>
                                                     )
                                                     : <p className="text-[13px] text-zinc-500">No map places this NPC.</p>}

@@ -174,10 +174,10 @@ public sealed partial class WzService(string? root = null)
 
     /// <summary>
     /// The classic files whose data the web app shows as a table of the library's data in their window (mobs, mob
-    /// locations, maps, NPCs). Keep in step with the web app's DATA_VIEWS.
+    /// locations, NPCs). Keep in step with the web app's DATA_VIEWS.
     /// </summary>
     private static readonly HashSet<string> TableTops =
-        new(["Mob", "Etc", "Map", "Npc"], StringComparer.OrdinalIgnoreCase);
+        new(["Mob", "Etc", "Npc"], StringComparer.OrdinalIgnoreCase);
 
     private static readonly char[] Digits = "0123456789".ToCharArray();
 
@@ -185,11 +185,11 @@ public sealed partial class WzService(string? root = null)
     private static string TopOf(string path) => WzLayout.Classic(path, "").Top.TrimEnd(Digits);
 
     /// <summary>
-    /// A file with something to show without the raw tree: a view of its own (quests, Commodity, or the Character, Item
-    /// and Skill thumbnails), or a library table (not for the picture-only _Canvas parts, which sit under Mob).
+    /// A file with something to show without the raw tree: a view of its own (quests, Commodity, the Character, Item and
+    /// Skill thumbnails, or the map editor), or a library table (not for the picture-only _Canvas parts, which sit under Mob).
     /// </summary>
     public static bool IsBrowsable(string path, string kind) =>
-        HasOwnView(kind) || kind is "character" or "item" or "skill"
+        HasOwnView(kind) || kind is "character" or "item" or "skill" or "map"
         || kind != "canvas" && !IsCanvasFile(path) && TableTops.Contains(TopOf(path));
 
     /// <summary>Each file's kind, keyed by path and remembered until the file on disk changes.</summary>
