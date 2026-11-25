@@ -2,13 +2,16 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardE
 import type { QuestSummary } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import { useActions } from "../lib/workspace";
+import { NewQuestForm } from "./new-quest-form";
 import { Search, XMark } from "./icons";
 import { PaneResizer, paneVar, usePaneWidth } from "./pane-resizer";
-import { QuestDetailView, QuestSelectionView } from "./quest-detail";
+import { QuestDetailView, QuestSelectionView, type QuestView } from "./quest-detail";
 import { errorMessage } from "../lib/errors";
 
 const ROW_H = 40;
 const OVERSCAN = 8;
+/** The raw tree folders that list quests: a classic archive's images and a modular one's root. */
+const QUEST_FOLDERS = ["", "QuestInfo.img", "Check.img", "Say.img", "Act.img"];
 
 /** Lists every quest as "{id} - {name}" and shows the selected quest's data beside it. */
 export const QuestBrowser = memo(function QuestBrowser({ fileId, revision, onOpenRaw, focus }: {
@@ -20,11 +23,12 @@ export const QuestBrowser = memo(function QuestBrowser({ fileId, revision, onOpe
     focus?: { quest: number } | null;
 }) {
     const { api, status, readOnly } = useConnection();
-    const { toast } = useActions();
+    const { toast, edited, confirm } = useActions();
     const [quests, setQuests] = useState<QuestSummary[] | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [filter, setFilter] = useState("");
     const [selected, setSelected] = useState<number | null>(null);
+    const [view, setView] = useState<QuestView>("quest");
     const listPane = usePaneWidth("quests", 320, 200, 720);
     // Links inside the detail pane are created once per quest, so they read the current selection through a ref.
     const selectedRef = useRef<number | null>(null);
@@ -95,8 +99,10 @@ export const QuestBrowser = memo(function QuestBrowser({ fileId, revision, onOpe
     };
 
     const openQuest = useCallback((id: number) => {
-        if (id === selectedRef.current) return;
-        if (selectedRef.current != null) setHistory((h) => [...h.slice(-49), selectedRef.current!]);
+        // Read now: the ref has moved on by the time the state updates.
+        const previous = selectedRef.current;
+        if (id === previous) return;
+        if (previous != null) setHistory((visited) => [...visited.slice(-49), previous]);
         goTo(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [quests, toast]);
@@ -115,6 +121,50 @@ export const QuestBrowser = memo(function QuestBrowser({ fileId, revision, onOpe
         goTo(previous);
     };
     const previousQuest = history.length ? quests?.find((q) => q.id === history[history.length - 1]) : undefined;
+
+    // A new quest can only be shown once it's in the list, which is fetched again after the edit.
+    const [created, setCreated] = useState<number | null>(null);
+    useEffect(function showCreated() {
+        if (created == null || !quests?.some((quest) => quest.id === created)) return;
+        setCreated(null);
+        openQuest(created);
+    }, [created, quests, openQuest]);
+
+    const createQuest = useCallback(async function createQuest(quest: { id: number; from?: number; after?: number }) {
+        try {
+            edited(await api.createQuest(fileId, quest), QUEST_FOLDERS);
+            setCreated(quest.id);
+            setView("edit");
+            return true;
+        } catch (reason) {
+            toast("error", errorMessage(reason));
+            return false;
+        }
+    }, [api, fileId, edited, toast]);
+
+    async function deleteQuest(id: number) {
+        const confirmed = await confirm({
+            title: `Delete quest ${id}?`,
+            body: "Its About, Requirements, Dialogue and Actions are removed from this file, in memory only. Quests that "
+                + "mention it keep doing so. Nothing on disk changes until you save, and undo brings it back.",
+            confirmLabel: "Delete",
+            danger: true,
+        });
+        if (!confirmed) return;
+        try {
+            edited(await api.deleteQuest(fileId, id), QUEST_FOLDERS);
+            setHistory((previous) => previous.filter((visited) => visited !== id));
+            setSelected(null);
+        } catch (reason) {
+            toast("error", errorMessage(reason));
+        }
+    }
+
+    // Undoing a new quest (or reverting) takes away the one that's shown.
+    useEffect(function dropMissing() {
+        if (!quests || selected == null || quests.some((quest) => quest.id === selected)) return;
+        setSelected(null);
+    }, [quests, selected]);
 
     // Clearing the search brings back every quest; keep the selected one centred so the user can look around it.
     const clearFilter = () => {
@@ -272,6 +322,9 @@ export const QuestBrowser = memo(function QuestBrowser({ fileId, revision, onOpe
                             })}
                         </div>
                     </div>
+                    {!readOnly && quests && (
+                        <NewQuestForm quests={quests} current={selected} onCreate={createQuest} onDelete={deleteQuest} />
+                    )}
                 </div>
 
                 <PaneResizer pane={listPane} side="left" label="Resize the quest list" className="hidden @xl:block" />
@@ -291,7 +344,17 @@ export const QuestBrowser = memo(function QuestBrowser({ fileId, revision, onOpe
                             <p className="max-w-xs text-sm leading-6 text-zinc-500">Pick a quest to see its requirements, dialogue and actions.</p>
                         </div>
                     ) : (
-                        <QuestDetailView fileId={fileId} revision={revision} questId={selected} onOpenRaw={onOpenRaw} onOpenQuest={openQuest} />
+                        <QuestDetailView
+                            fileId={fileId}
+                            revision={revision}
+                            questId={selected}
+                            quests={quests ?? []}
+                            view={view}
+                            onView={setView}
+                            onOpenRaw={onOpenRaw}
+                            onOpenQuest={openQuest}
+                            onCreate={createQuest}
+                        />
                     )}
                 </div>
             </div>

@@ -11,7 +11,7 @@ export interface RefContext {
 }
 export const RefCtx = createContext<RefContext | null>(null);
 
-const KIND_LABEL: Record<LookupKind, string> = { npc: "NPC", item: "Item", mob: "Mob", map: "Map", skill: "Skill", quest: "Quest" };
+export const KIND_LABEL: Record<LookupKind, string> = { npc: "NPC", item: "Item", mob: "Mob", map: "Map", skill: "Skill", quest: "Quest" };
 
 // Whether a picture exists is looked up once per URL; the browser then has the image cached for the tooltip itself.
 type Probe = { w: number; h: number } | null;
@@ -131,6 +131,21 @@ export function RefLink({ kind, id, name, children }: { kind: LookupKind; id: nu
                 document.body,
             )}
         </>
+    );
+}
+
+/** The name of a thing, once it's known. */
+export const NamesCtx = createContext<(kind: LookupKind, id: number) => string | undefined>(() => undefined);
+
+/** "Paul (9000000)" once the name is known, "NPC 9000000" until then (or when there is no String.wz). */
+export function Ref({ kind, id }: { kind: LookupKind; id: number }) {
+    const name = useContext(NamesCtx)(kind, id);
+    return (
+        <RefLink kind={kind} id={id} name={name}>
+            {name
+                ? <><span className="font-medium">{name}</span> <span className="font-mono text-xs text-zinc-500">({id})</span></>
+                : <span className="font-mono text-[13px]"><span className="text-zinc-500">{KIND_LABEL[kind]}</span> {id}</span>}
+        </RefLink>
     );
 }
 

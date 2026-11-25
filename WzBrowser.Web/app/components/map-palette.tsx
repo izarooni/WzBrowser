@@ -203,7 +203,7 @@ function LifePicker({ fileId, kind, tool, onTool }: {
         function showNone() {
             if (!cancelled) setFound([]);
         }
-        const search = () => api.mapNames(fileId, kind, needle).then(showFound, showNone);
+        const search = () => api.searchNames(fileId, kind, needle).then(showFound, showNone);
         const timer = setTimeout(search, 250);
         return () => {
             cancelled = true;

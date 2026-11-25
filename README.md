@@ -48,6 +48,8 @@ Character.wz, Item.wz and Skill.wz open on a grid of thumbnails by section (a sl
 
 Map.wz (or a modular part holding maps) opens on a map editor. Click a thing to select it, then drag it; a drag anywhere else, or with the middle button, moves the view, and Shift+drag selects everything in a rectangle. Alt+click reaches what is underneath. Copy, cut and paste (Ctrl+C, Ctrl+X, Ctrl+V, also between maps of the file), duplicate (Ctrl+D), flip (Ctrl+F) and delete, or place and draw new tiles, objects, backgrounds, mobs, NPCs, reactors, portals, footholds, ladders, ropes, seats and areas. A grid can be shown and snapped to, for footholds separately. It also makes new maps and copies of maps, redraws minimaps, checks maps for problems and exports them as pictures.
 
+Quest.wz opens on a list of quests. Below it, new quests are made from an unused id, empty or as a copy of the open one. A quest's Edit tab creates its About, Requirements, Dialogue and Actions (QuestInfo, Check, Say and Act) and the stages in them, adds requirements and rewards from a menu, picks items, NPCs, mobs, maps, skills and other quests by id or name, and chains quests together.
+
 Double-click a window's title bar (or use the button beside close) to maximize it.
 
 Ctrl+Z and Ctrl+Y undo and redo edits to any file. The History window lists them, and clicking one goes back or forward to it. Saving, reverting or closing a file takes its edits out of the history.

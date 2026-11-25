@@ -224,6 +224,11 @@ api.MapPost("/files/{id}/revert", (string id, WzService wz) => wz.Revert(id));
 api.MapGet("/files/{id}/quests", (string id, WzService wz) => wz.Quests(id));
 api.MapGet("/files/{id}/quests/{questId:int}", (string id, int questId, WzService wz) => wz.Quest(id, questId));
 api.MapGet("/files/{id}/quests/{questId:int}/chain", (string id, int questId, WzService wz) => wz.QuestChain(id, questId));
+api.MapPost("/files/{id}/quests", (string id, QuestCreateRequest request, WzService wz) => wz.CreateQuest(id, request));
+api.MapPost("/files/{id}/quests/edit", (string id, QuestEditRequest request, WzService wz) => wz.EditQuests(id, request));
+api.MapDelete("/files/{id}/quests/{questId:int}", (string id, int questId, WzService wz) => wz.DeleteQuest(id, questId));
+// Things whose id or name contains a text, for the map and quest editors to pick from.
+api.MapGet("/files/{id}/names", (string id, string kind, string q, WzService wz) => wz.SearchNames(id, kind, q));
 api.MapPost("/files/{id}/lookup", (string id, LookupRequest req, WzService wz) => wz.Lookup(id, req));
 // Etc.wz's Commodity.img (Cash Shop entries): the whole table, set one value, add an entry with a generated SN.
 api.MapGet("/files/{id}/commodity", (string id, WzService wz) => wz.Commodity(id));
@@ -237,7 +242,7 @@ api.MapPost("/files/{id}/category", (string id, CategoryAddRequest req, WzServic
 api.MapPut("/files/{id}/category", (string id, CategoryRenameRequest req, WzService wz) => wz.RenameCategorySub(id, req));
 api.MapPost("/files/{id}/category/delete", (string id, List<string> entries, WzService wz) => wz.DeleteCategorySubs(id, entries));
 // The map editor: a Map file's maps, what one places, its pictures, the sets of things to
-// place, names, music and edits.
+// place, music and edits.
 api.MapGet("/files/{id}/maps", (string id, WzService wz) => wz.EditorMaps(id));
 api.MapGet("/files/{id}/maps/layout", (string id, string path, WzService wz) => wz.MapLayout(id, path));
 api.MapGet("/files/{id}/maps/sprite", (string id, string key, HttpContext context, WzService wz) =>
@@ -246,7 +251,6 @@ api.MapGet("/files/{id}/maps/sets", (string id, string kind, WzService wz) => wz
 api.MapGet("/files/{id}/maps/pieces", (string id, string kind, string set, WzService wz) =>
     wz.MapPieces(id, kind, set));
 api.MapGet("/files/{id}/maps/sprites", (string id, string[] key, WzService wz) => wz.MapSprites(id, key));
-api.MapGet("/files/{id}/maps/names", (string id, string kind, string q, WzService wz) => wz.SearchNames(id, kind, q));
 api.MapGet("/files/{id}/maps/music", (string id, string name, WzService wz) =>
     wz.MapMusic(id, name) is { } music
         ? Results.File(music.Bytes, music.ContentType, enableRangeProcessing: true)

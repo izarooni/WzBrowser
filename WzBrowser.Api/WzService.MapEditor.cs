@@ -736,11 +736,13 @@ public sealed partial class WzService
 
     // ------------------------------------------------------------ names and music
 
-    /// <summary>Mobs or NPCs whose id or String name contains the text.</summary>
+    /// <summary>The mobs, NPCs, items, maps or skills whose id or String name contains the text.</summary>
     public List<NamedIdDto> SearchNames(string id, string kind, string text)
     {
-        if (kind is not ("mob" or "npc")) throw new ArgumentException("Only mobs and NPCs can be searched.");
-        var entry = GetMapFile(id);
+        if (kind is not ("mob" or "npc" or "item" or "map" or "skill"))
+            throw new ArgumentException($"'{kind}' names can't be searched.");
+        var entry = Get(id);
+        if (entry.Kind is not ("map" or "quest")) throw new InvalidDataException("This file has nothing to pick names for.");
         NameIndex names;
         lock (entry.Lock) names = entry.Names ??= new NameIndex(entry.Path, InRoot);
         return names.Search(kind, text.Trim(), MaxNameHits).Select(hit => new NamedIdDto(hit.Key, hit.Value)).ToList();

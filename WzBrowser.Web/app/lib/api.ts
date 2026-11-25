@@ -253,6 +253,20 @@ export interface MapEdit {
     from?: string;
 }
 
+export type QuestSection = "QuestInfo" | "Check" | "Say" | "Act";
+/**
+ * `path` is inside the quest's section. "set" with a `type` adds the property, and the folders it's in, when missing;
+ * "remove" takes out a numbered entry of a list and moves the ones after it up.
+ */
+export interface QuestEdit {
+    op: "set" | "folder" | "delete" | "remove";
+    quest: number;
+    section: QuestSection;
+    path: string;
+    value?: string;
+    type?: string;
+}
+
 /** One file of an XML conversion. `total` is its image count, known once it's open; `folder` is e.g. "Mob.wz". */
 export interface XmlExportFile { name: string; folder: string; images: number; total: number; state: "waiting" | "running" | "done" | "failed" | "cancelled"; error: string | null }
 /** A conversion running on the server. `failed`: it finished, but at least one file couldn't be converted. */
@@ -505,8 +519,9 @@ export function createApi(base: string) {
         mapSprites: (id: string, keys: string[]) =>
             request<Record<string, MapSprite>>(
                 `/api/files/${id}/maps/sprites?${keys.map((key) => `key=${q(key)}`).join("&")}`),
-        mapNames: (id: string, kind: "mob" | "npc", text: string) =>
-            request<NamedId[]>(`/api/files/${id}/maps/names?kind=${kind}&q=${q(text)}`),
+        /** The things whose id or String name contains the text. */
+        searchNames: (id: string, kind: Exclude<LookupKind, "quest">, text: string) =>
+            request<NamedId[]>(`/api/files/${id}/names?kind=${kind}&q=${q(text)}`),
         mapMusicUrl: (id: string, name: string) => `${base}/api/files/${id}/maps/music?name=${q(name)}`,
         /** Adds a blank map, or a copy of the one at `from`. */
         createMap: (id: string, mapId: number, from: string | null) =>
@@ -538,6 +553,22 @@ export function createApi(base: string) {
             }),
         quest: (id: string, questId: number) => request<QuestDetail>(`/api/files/${id}/quests/${questId}`),
         questChain: (id: string, questId: number) => request<QuestChain>(`/api/files/${id}/quests/${questId}/chain`),
+        /** Adds a quest, as a copy of `from` and leading on from `after` when given. Refused when the id is used. */
+        createQuest: (id: string, quest: { id: number; from?: number; after?: number }) =>
+            request<OpenedFile>(`/api/files/${id}/quests`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(quest),
+            }),
+        /** Applies edits to quests, all or nothing, as one step that can be undone. */
+        editQuests: (id: string, label: string, ops: QuestEdit[]) =>
+            request<OpenedFile>(`/api/files/${id}/quests/edit`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ label, ops }),
+            }),
+        deleteQuest: (id: string, questId: number) =>
+            request<OpenedFile>(`/api/files/${id}/quests/${questId}`, { method: "DELETE" }),
         commodity: (id: string) => request<CommodityTable>(`/api/files/${id}/commodity`),
         /** Sets each `entry/property`, creating it as `type` when the entry doesn't have it. All or nothing. */
         setCommodity: (id: string, sets: CommoditySet[]) =>

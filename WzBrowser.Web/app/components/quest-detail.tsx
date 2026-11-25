@@ -1,21 +1,17 @@
-import { createContext, memo, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { LookupKind, LookupRequest, PropTree, QuestChain, QuestDetail } from "../lib/api";
+import { memo, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import type { LookupKind, LookupRequest, PropTree, QuestChain, QuestDetail, QuestSummary } from "../lib/api";
 import { useConnection } from "../lib/connection";
 import {
     JOB_NAMES, QUEST_STATES, STAGE_LABELS, formatMinutes, formatStamp, parseMapleText, refsInText, type TextColor,
 } from "../lib/quest-format";
 import { useNames } from "../lib/use-names";
-import { Archive } from "./icons";
-import { RefCtx, RefIcon, RefLink } from "./ref-link";
+import { child, int, isNumbered, isString, kids } from "../lib/prop-tree";
+import { Card, StageCard } from "./quest-cards";
+import { QuestEditor } from "./quest-editor";
+import { KIND_LABEL, NamesCtx, Ref, RefCtx, RefIcon, RefLink } from "./ref-link";
 import { errorMessage } from "../lib/errors";
 
-// ------------------------------------------------------------------ tree helpers
-
-const kids = (t?: PropTree | null) => t?.children ?? [];
-const child = (t: PropTree | null | undefined, name: string) => kids(t).find((c) => c.name === name);
-const int = (t?: PropTree | null) => (t && t.value != null && /^-?\d+$/.test(t.value) ? Number(t.value) : undefined);
-const isNumbered = (t: PropTree) => /^\d+$/.test(t.name);
-const isString = (t: PropTree) => t.type === "string" && !t.children;
+// ------------------------------------------------------------------ names
 
 /** Which kind of thing the `id` of each entry in these lists refers to. */
 const LIST_KIND: Record<string, LookupKind> = { item: "item", mob: "mob", quest: "quest", skill: "skill", pet: "item", mbcard: "item" };
@@ -49,22 +45,6 @@ function collectIds(ds: (QuestDetail | null)[]): LookupRequest {
 }
 
 // ------------------------------------------------------------------ shared bits
-
-const NamesCtx = createContext<(kind: LookupKind, id: number) => string | undefined>(() => undefined);
-
-const KIND_LABEL: Record<LookupKind, string> = { npc: "NPC", item: "Item", mob: "Mob", map: "Map", skill: "Skill", quest: "Quest" };
-
-/** "Paul (9000000)" once the name is known, "NPC 9000000" until then (or when there is no String.wz). */
-function Ref({ kind, id }: { kind: LookupKind; id: number }) {
-    const name = useContext(NamesCtx)(kind, id);
-    return (
-        <RefLink kind={kind} id={id} name={name}>
-            {name
-                ? <><span className="font-medium">{name}</span> <span className="font-mono text-xs text-zinc-500">({id})</span></>
-                : <span className="font-mono text-[13px]"><span className="text-zinc-500">{KIND_LABEL[kind]}</span> {id}</span>}
-        </RefLink>
-    );
-}
 
 const COLOR_CLASS: Record<Exclude<TextColor, null>, string> = {
     blue: "text-sky-600 dark:text-sky-400",
@@ -101,37 +81,6 @@ function MapleText({ text }: { text: string }) {
                 }
             })}
         </span>
-    );
-}
-
-function Card({ title, subtitle, onOpenRaw, children }: { title: string; subtitle?: string; onOpenRaw?: () => void; children: ReactNode }) {
-    return (
-        <section className="space-y-5 rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-            <div className="flex items-start justify-between gap-4">
-                <div className="space-y-1">
-                    <h3 className="text-base font-semibold">{title}</h3>
-                    {subtitle && <p className="text-xs text-zinc-500">{subtitle}</p>}
-                </div>
-                {onOpenRaw && (
-                    <button type="button" onClick={onOpenRaw} className="flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100">
-                        <Archive className="size-3.5" />Raw tree
-                    </button>
-                )}
-            </div>
-            {children}
-        </section>
-    );
-}
-
-function StageCard({ label, stage, children, empty }: { label: string; stage: number | string; children: ReactNode; empty: boolean }) {
-    return (
-        <div className="min-w-0 space-y-4 rounded-xl bg-zinc-50 p-5 dark:bg-zinc-950/60">
-            <div className="flex items-center gap-2.5">
-                <span className="grid size-5 place-items-center rounded-md bg-zinc-200 font-mono text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{stage}</span>
-                <h4 className="text-sm font-semibold">{label}</h4>
-            </div>
-            {empty ? <p className="text-sm text-zinc-400">Nothing set.</p> : children}
-        </div>
     );
 }
 
@@ -597,17 +546,25 @@ export const QuestSelectionView = memo(function QuestSelectionView({ fileId, rev
 const INFO_HANDLED = new Set(["name", "parent", "area", "order", "0", "1", "2", "summary", "demandSummary", "rewardSummary", "type", "autoStart", "autoComplete", "autoAccept", "autoPreComplete", "oneShot"]);
 const INFO_FLAGS: Record<string, string> = { autoStart: "Auto start", autoAccept: "Auto accept", autoPreComplete: "Auto pre-complete", autoComplete: "Auto complete", oneShot: "One shot" };
 
-export const QuestDetailView = memo(function QuestDetailView({ fileId, revision, questId, onOpenRaw, onOpenQuest }: {
+export type QuestView = "quest" | "chain" | "edit";
+
+export const QuestDetailView = memo(function QuestDetailView(
+    { fileId, revision, questId, quests, view, onView, onOpenRaw, onOpenQuest, onCreate }: {
     fileId: string;
     revision: number;
     questId: number;
+    quests: QuestSummary[];
+    view: QuestView;
+    onView: (view: QuestView) => void;
+    /** Adds a quest; resolves false when it was refused. */
+    onCreate: (quest: { id: number; from?: number; after?: number }) => Promise<boolean>;
     /** Left out when there's no raw tree to show. */
     onOpenRaw?: (path: string) => void;
     /** Jump to another quest in this archive (quest links). */
     onOpenQuest: (id: number) => void;
 }) {
     const refs = useMemo(() => ({ fileId, openQuest: onOpenQuest }), [fileId, onOpenQuest]);
-    const { api } = useConnection();
+    const { api, readOnly } = useConnection();
     const [detail, setDetail] = useState<QuestDetail | null>(null);
     const [error, setError] = useState<string | null>(null);
 
@@ -622,7 +579,6 @@ export const QuestDetailView = memo(function QuestDetailView({ fileId, revision,
     }, [api, fileId, questId, revision]);
 
     const [chain, setChain] = useState<QuestChain | null>(null);
-    const [view, setView] = useState<"quest" | "chain">("quest");
     useEffect(() => {
         let cancelled = false;
         // Without a chain the quest is still shown, just with no Chain tab.
@@ -637,12 +593,21 @@ export const QuestDetailView = memo(function QuestDetailView({ fileId, revision,
     const current = detail?.id === questId ? detail : null;
     // Moving along the chain keeps it (and the tab) on screen until the refetch lands, since it's the same chain.
     const currentChain = chain && chain.quests.length > 1 && chain.quests.some((q) => q.id === questId) ? chain : null;
-    const names = useNames(fileId, useMemo(() => collectIds([current, ...(currentChain?.quests ?? [])]), [current, currentChain]), revision);
+    const shownQuests = useMemo(function listShownQuests() {
+        return [current, ...(currentChain?.quests ?? [])];
+    }, [current, currentChain]);
+    const names = useNames(fileId, useMemo(() => collectIds(shownQuests), [shownQuests]), revision);
 
     if (error) return <p role="alert" className="error-text">{error}</p>;
     if (!current) {
         return <div className="space-y-4 p-6">{[24, 56, 40].map((h, i) => <div key={i} className="skeleton rounded-xl bg-zinc-100 dark:bg-zinc-800" style={{ height: h * 3 }} />)}</div>;
     }
+
+    const tabs: { view: QuestView; label: string }[] = [{ view: "quest", label: "Quest" }];
+    if (currentChain) tabs.push({ view: "chain", label: `Chain · ${currentChain.quests.length} quests` });
+    if (!readOnly) tabs.push({ view: "edit", label: "Edit" });
+    // A tab this quest doesn't have shows the quest instead.
+    const shown = tabs.some((tab) => tab.view === view) ? view : "quest";
 
     const { info, check, say, act, paths } = current;
     const stageOf = (t: PropTree | null, n: number) => child(t, String(n));
@@ -671,28 +636,39 @@ export const QuestDetailView = memo(function QuestDetailView({ fileId, revision,
                     </div>
                 </header>
 
-                {currentChain && (
+                {tabs.length > 1 && (
                     <div role="tablist" aria-label="Quest view" className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
-                        {(["quest", "chain"] as const).map((t) => (
+                        {tabs.map((tab) => (
                             <button
-                                key={t}
+                                key={tab.view}
                                 type="button"
                                 role="tab"
-                                aria-selected={view === t}
-                                onClick={() => setView(t)}
+                                aria-selected={shown === tab.view}
+                                onClick={() => onView(tab.view)}
                                 className={`-mb-px rounded-t-lg border-b-2 px-4 py-2 text-[13px] font-medium transition ${
-                                    view === t
+                                    shown === tab.view
                                         ? "border-accent-500 text-accent-700 dark:text-accent-300"
                                         : "border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
                                 }`}
                             >
-                                {t === "quest" ? "Quest" : `Chain · ${currentChain.quests.length} quests`}
+                                {tab.label}
                             </button>
                         ))}
                     </div>
                 )}
 
-                {currentChain && view === "chain" ? <ChainSummary chain={currentChain} questId={questId} /> : <>
+                {shown === "chain" && <ChainSummary chain={currentChain!} questId={questId} />}
+                {shown === "edit" && (
+                    <QuestEditor
+                        key={questId}
+                        fileId={fileId}
+                        quest={current}
+                        quests={quests}
+                        onOpenRaw={onOpenRaw}
+                        onCreate={onCreate}
+                    />
+                )}
+                {shown === "quest" && <>
                 <Card title="About" subtitle={`${paths.info}: journal text and summaries`} onOpenRaw={onOpenRaw && (() => onOpenRaw(paths.info))}>
                     {journal.length === 0 && summaries.length === 0 && <p className="text-sm text-zinc-400">No text.</p>}
                     <div className="grid gap-4 @2xl:grid-cols-3">
