@@ -5,6 +5,8 @@ import { baseName, canPaste, joinPath, parentPath } from "../lib/paths";
 import { dnd, useActions, useWorkspaceData, type ClipItem, type TreeEvent } from "../lib/workspace";
 import { ArrowUp, ChevronRight, ChevronsIn, Copy, Document, Download, ExclamationTriangle, Folder, Music, Photo, Search, Upload, XMark } from "./icons";
 import { EDITABLE, invalid } from "../lib/values";
+import { isFieldLimit } from "../lib/field-limit";
+import { FieldLimitEditor } from "./field-limit-editor";
 import { IMAGE_QUALITIES, formatName, loadImageQuality, saveImageQuality } from "../lib/image-quality";
 import { download } from "../lib/download";
 import { copyText } from "../lib/copy-text";
@@ -869,6 +871,16 @@ function Detail({ pane, fileId, path, node, fileName, childCount, canPasteHere, 
                 ) : node.value != null && node.type !== "canvas" && <Field label="Value"><span className="whitespace-pre-wrap break-words font-mono">{node.value}</span></Field>}
                 {childCount != null && <Field label="Children"><span className="font-mono">{childCount.toLocaleString()}</span></Field>}
             </dl>
+
+            {isFieldLimit(path) && EDITABLE.has(node.type) && (
+                <FieldLimitEditor
+                    key={`limits:${fileId}/${path}`}
+                    type={node.type}
+                    value={node.value}
+                    readOnly={readOnly}
+                    onSave={(value) => ws.editNode(fileId, path, { value })}
+                />
+            )}
         </aside>
     );
 }
@@ -893,9 +905,11 @@ const NOT_PROPERTY = new Set(["file", "directory", "image"]);
  * Text that turns into an input when clicked (or focused and Enter/F2 pressed). Enter saves, Esc cancels,
  * leaving the field saves a valid change. Multiline fields take Shift+Enter for a new line.
  */
-export function InlineEdit({ label, value, multiline = false, check, onSave, className = "" }: {
+export function InlineEdit({ label, value, placeholder = "(empty)", multiline = false, check, onSave, className = "" }: {
     label: string;
     value: string;
+    /** Shown in place of an empty value. */
+    placeholder?: string;
     multiline?: boolean;
     /** Why the text can't be saved, or null. */
     check: (v: string) => string | null;
@@ -922,7 +936,7 @@ export function InlineEdit({ label, value, multiline = false, check, onSave, cla
                 onClick={() => setText(value)}
                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === "F2") { e.preventDefault(); setText(value); } }}
                 className={`-mx-1.5 block cursor-text whitespace-pre-wrap break-words rounded-md px-1.5 outline-none hover:bg-zinc-100 focus-visible:ring-2 focus-visible:ring-accent-500/60 dark:hover:bg-zinc-800 ${className}`}>
-                {value === "" ? <span className="font-sans font-normal italic text-zinc-400">(empty)</span> : value}
+                {value === "" ? <span className="font-sans font-normal italic text-zinc-400">{placeholder}</span> : value}
             </span>
         );
     }

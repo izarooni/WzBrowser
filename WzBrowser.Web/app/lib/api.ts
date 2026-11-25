@@ -34,9 +34,10 @@ export interface OpenedFile {
      * "quest" for a quest archive (QuestInfo.img + Check.img at the root, or a modular QuestData with one {id}.img per
      * quest); "etc" when Commodity.img is at the root; "canvas" for a modular install's picture file
      * (Data/Mob/_Canvas/_Canvas_000.wz); "character" for Character.wz or one of its modular parts; "item" for Item.wz
-     * or one of its; "skill" for Skill.wz or one of its.
+     * or one of its; "skill" for Skill.wz or one of its; "map" for Map.wz or a
+     * modular part holding maps.
      */
-    kind: "quest" | "etc" | "canvas" | "character" | "item" | "skill" | "generic";
+    kind: "quest" | "etc" | "canvas" | "character" | "item" | "skill" | "map" | "generic";
     /** Changes whenever the file's contents change, so views know to refetch. */
     revision: number;
     /** The classic file this one is or is part of: "Mob" for Mob.wz, Data/Mob/Mob_000.wz or Packs/Mob_000.ms. */
@@ -207,6 +208,55 @@ export interface NpcQuest { id: number; name: string; archive: string; starts: b
 /** An NPC that at least one quest in the library starts or ends at. */
 export interface NpcQuests { id: number; name: string | null; quests: NpcQuest[] }
 
+/** An edit to one or more files, by name. */
+export interface HistoryStep { id: number; label: string; files: string[] }
+/** Edits to any file, oldest first, with the undone ones last; `done`: how many of them are in place. */
+export interface EditHistory { steps: HistoryStep[]; done: number }
+
+/** A map in an open Map file; `path` is its .img. */
+export interface MapEntry { id: number; path: string; name: string | null }
+export type MapItemKind = "back" | "tile" | "obj" | "life" | "reactor" | "portal" | "foothold" | "ladder" | "seat"
+    | "area" | "misc" | "bounds";
+/**
+ * One thing a map places. `path` is inside the map's .img; `layer` is -1 for what isn't in one; `sprite` is the key of
+ * its picture; `values` are its scalar properties.
+ */
+export interface MapItem {
+    path: string;
+    kind: MapItemKind;
+    layer: number;
+    sprite: string | null;
+    values: Record<string, string>;
+}
+export interface MapSprite { originX: number; originY: number; z: number }
+/**
+ * `tileSets`: each layer's tile set, "" when it has none; `tileScales`: how many times the usual size its tiles are.
+ * `minimap`: its width, centerX, mag, ...; null when the map has none.
+ */
+export interface MapLayout {
+    info: Record<string, string>;
+    tileSets: string[];
+    tileScales: number[];
+    minimap: Record<string, string> | null;
+    items: MapItem[];
+}
+export type MapSetKind = "tile" | "obj" | "back";
+export interface NamedId { id: number; name: string }
+/** A tile ("bsc/0"), object ("house/wall/3") or background ("back/0", "ani/0") that can be placed. */
+export interface MapPiece { path: string; sprite: string }
+/**
+ * `path` is inside the map's .img. "set" with a `type` adds the property, and the folders it's in, when missing; "copy"
+ * and "move" put the node at `target`, a copy optionally coming `from` another map of the file.
+ */
+export interface MapEdit {
+    op: "set" | "copy" | "move" | "delete";
+    path: string;
+    value?: string;
+    type?: string;
+    target?: string;
+    from?: string;
+}
+
 /** One file of an XML conversion. `total` is its image count, known once it's open; `folder` is e.g. "Mob.wz". */
 export interface XmlExportFile { name: string; folder: string; images: number; total: number; state: "waiting" | "running" | "done" | "failed" | "cancelled"; error: string | null }
 /** A conversion running on the server. `failed`: it finished, but at least one file couldn't be converted. */
@@ -362,6 +412,10 @@ export function createApi(base: string) {
         /** Every NPC the library's quests start or end at, ordered by NPC id. */
         npcQuests: (file?: Scope) => request<NpcQuests[]>(`/api/npcs/quests${scope(file)}`),
         npcSpriteUrl: (id: number, file?: Scope) => `${base}/api/npcs/${id}/sprite${scope(file)}`,
+        history: () => request<EditHistory>("/api/history"),
+        /** Undoes or redoes until the action is the last in place (0: none is). `files` are the ones it changed. */
+        goToHistory: (id: number) =>
+            request<{ history: EditHistory; files: OpenedFile[] }>(`/api/history/${id}`, { method: "POST" }),
         files: () => request<OpenedFile[]>("/api/files"),
         /** `encryption` null (or empty) detects it. */
         open: (path: string, encryption: string | null) =>
@@ -443,6 +497,48 @@ export function createApi(base: string) {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(body),
+            }),
+        /** The maps in a Map file, by id, with String's names. */
+        editorMaps: (id: string) => request<MapEntry[]>(`/api/files/${id}/maps`),
+        mapLayout: (id: string, path: string) => request<MapLayout>(`/api/files/${id}/maps/layout?path=${q(path)}`),
+        mapItemSpriteUrl: (id: string, key: string) => `${base}/api/files/${id}/maps/sprite?key=${q(key)}`,
+        mapSets: (id: string, kind: MapSetKind) => request<string[]>(`/api/files/${id}/maps/sets?kind=${kind}`),
+        mapPieces: (id: string, kind: MapSetKind, set: string) =>
+            request<MapPiece[]>(`/api/files/${id}/maps/pieces?kind=${kind}&set=${q(set)}`),
+        /** Where each picture sits; those that can't be found are left out. */
+        mapSprites: (id: string, keys: string[]) =>
+            request<Record<string, MapSprite>>(
+                `/api/files/${id}/maps/sprites?${keys.map((key) => `key=${q(key)}`).join("&")}`),
+        mapNames: (id: string, kind: "mob" | "npc", text: string) =>
+            request<NamedId[]>(`/api/files/${id}/maps/names?kind=${kind}&q=${q(text)}`),
+        mapMusicUrl: (id: string, name: string) => `${base}/api/files/${id}/maps/music?name=${q(name)}`,
+        /** Adds a blank map, or a copy of the one at `from`. */
+        createMap: (id: string, mapId: number, from: string | null) =>
+            request<{ map: MapEntry; file: OpenedFile }>(`/api/files/${id}/maps/create`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: mapId, from }),
+            }),
+        /** Stores a picture of the map as its minimap; the center is how far the map's 0, 0 is from its top left. */
+        setMinimap: (
+            id: string,
+            path: string,
+            picture: Blob,
+            area: { width: number; height: number; centerX: number; centerY: number },
+        ) => {
+            const place = new URLSearchParams(Object.entries(area).map(([name, value]) => [name, String(value)]));
+            return request<OpenedFile>(`/api/files/${id}/maps/minimap?path=${q(path)}&${place}`, {
+                method: "PUT",
+                headers: { "Content-Type": picture.type },
+                body: picture,
+            });
+        },
+        /** Applies edits inside one map, all or nothing, as one step that can be undone. */
+        editMap: (id: string, path: string, label: string, ops: MapEdit[]) =>
+            request<OpenedFile>(`/api/files/${id}/maps/edit`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ path, label, ops }),
             }),
         quest: (id: string, questId: number) => request<QuestDetail>(`/api/files/${id}/quests/${questId}`),
         questChain: (id: string, questId: number) => request<QuestChain>(`/api/files/${id}/quests/${questId}/chain`),

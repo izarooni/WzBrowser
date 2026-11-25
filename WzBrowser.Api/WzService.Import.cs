@@ -66,6 +66,7 @@ public sealed partial class WzService
                 var target = Resolve(entry.File, path);
                 if (target is WzUOLProperty uol) target = uol.GetLinkedWzImageProperty() ?? throw new InvalidDataException("This link doesn't lead anywhere.");
                 var run = new ImportRun(entry, format);
+                using var edit = new EditScope(entry).Watch(target);
 
                 // Its own export: a single folder named like the node (and, for a canvas, its picture beside it).
                 var name = target switch
@@ -100,7 +101,11 @@ public sealed partial class WzService
 
                 var changed = run.Images + run.Properties + run.Created > 0;
                 if (!changed && run.Warnings.Count == 0) throw new InvalidDataException("The zip has no folders or PNGs to import.");
-                if (changed) Touch(entry);
+                if (changed)
+                {
+                    Touch(entry);
+                    Record($"Import into {name}", edit.Finish());
+                }
                 return new ImportResult(path, Describe(id, entry), run.Images, run.Properties, run.Created, run.Warnings);
             }
         }
@@ -144,6 +149,7 @@ public sealed partial class WzService
 
     private void ImportDirectory(ImportRun run, WzDirectory dir, ZipFolder folder)
     {
+        run.Entry.Edit?.Watch(dir);
         foreach (var (key, sub) in folder.Folders)
         {
             // An export names images without ".img"; its .props has the real name.
@@ -161,6 +167,7 @@ public sealed partial class WzService
                 case WzDirectory d: ImportDirectory(run, d, sub); break;
                 case WzImage img:
                     if (!img.Parsed) img.ParseImage();
+                    run.Entry.Edit?.Watch(img);
                     ImportContainer(run, img, sub);
                     break;
                 default:
@@ -451,9 +458,7 @@ public sealed partial class WzService
             ?? (format >= 0 && Enum.IsDefined((WzPngFormat)format) ? (WzPngFormat?)Writable((WzPngFormat)format) : null)
             ?? (hadPicture ? Writable(canvas.PngProperty.Format) : WzPngFormat.Format2);
         if (target is WzPngFormat.Format1026 or WzPngFormat.Format2050) image = PadTo4(image);
-        canvas.PngProperty.SetCompressedBytes(Encode(image, target), image.Width, image.Height, target);
-        foreach (var link in new[] { WzCanvasProperty.InlinkPropertyName, WzCanvasProperty.OutlinkPropertyName })
-            canvas[link]?.Remove();
+        ReplacePicture(canvas, image, target);
         MarkChanged(canvas);
         run.Images++;
     }

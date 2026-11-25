@@ -61,6 +61,25 @@ public sealed partial class WzService
         var fileState = entries.ToDictionary(kv => kv.Key, kv => (kv.Value.Dirty, kv.Value.Revision));
         var imageChanged = new Dictionary<WzImage, bool>(ReferenceEqualityComparer.Instance);
         var undo = new Stack<Action>();
+        // The edits below become part of these, so the batch is one step of the history.
+        var scopes = entries.Values.Select(entry => new EditScope(entry)).ToList();
+        try { return BatchScoped(ops, entries, dryRun, report, fileState, imageChanged, undo, scopes); }
+        finally
+        {
+            foreach (var scope in scopes) scope.Dispose();
+        }
+    }
+
+    private BatchResult BatchScoped(
+        List<BatchOp> ops,
+        Dictionary<string, Entry> entries,
+        bool dryRun,
+        bool report,
+        Dictionary<string, (bool Dirty, long Revision)> fileState,
+        Dictionary<WzImage, bool> imageChanged,
+        Stack<Action> undo,
+        List<EditScope> scopes)
+    {
         var results = new List<BatchOpResult>();
 
         void Remember(object? node)
@@ -90,6 +109,11 @@ public sealed partial class WzService
         {
             Rollback(undo, entries, fileState, imageChanged);
             if (failure != null) results = [failure];
+        }
+        else
+        {
+            var label = ops.Count == 1 ? $"Batch {ops[0].Op}" : $"Batch of {ops.Count}";
+            Record(label, scopes.Select(scope => scope.Finish()));
         }
 
         var files = entries.Select(kv => Describe(kv.Key, kv.Value)).ToList();

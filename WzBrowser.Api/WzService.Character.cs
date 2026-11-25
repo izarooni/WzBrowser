@@ -479,6 +479,8 @@ public sealed partial class WzService
         lock (entry.Lock)
         {
             var added = false;
+            using var edit = new EditScope(entry);
+            if (!ReadOnly) edit.Watch(strings);
             var item = FindStringEntry(strings.WzProperties, request.Id);
             if (item == null)
             {
@@ -504,6 +506,7 @@ public sealed partial class WzService
             {
                 strings.Changed = true;
                 Touch(entry);
+                Record($"Add text of {request.Id}", edit.Finish());
             }
             entry.Hidden = false;
             return new CharacterStringOpenResult(Describe(fileId, entry), PathInImage(node), added);

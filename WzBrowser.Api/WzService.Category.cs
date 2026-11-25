@@ -84,9 +84,11 @@ public sealed partial class WzService
                 item.AddProperty(prop);
             }
 
+            using var edit = new EditScope(entry).Watch(img);
             img.AddProperty(item);
             RenumberCategories(img);
             Touch(entry);
+            Record($"Add sub tab {req.Name.Trim()}", edit.Finish());
             return new CategoryResult(CategoryTableOf(img), Describe(id, entry));
         }
     }
@@ -100,11 +102,13 @@ public sealed partial class WzService
         {
             var img = CategoryImage(entry);
             var item = img[req.Entry] as WzSubProperty ?? throw new KeyNotFoundException($"Entry '{req.Entry}' not found in {CategoryImg}.");
+            using var edit = new EditScope(entry).Watch(img);
             var prop = FindProp(item, "Name");
             if (prop == null) item.AddProperty(prop = NewValueProperty("Name", "string"));
             SetValue(prop, req.Name.Trim());
             MarkChanged(item);
             Touch(entry);
+            Record($"Rename sub tab to {req.Name.Trim()}", edit.Finish());
             return new CategoryResult(CategoryTableOf(img), Describe(id, entry));
         }
     }
@@ -132,11 +136,13 @@ public sealed partial class WzService
             var commodity = commodityImg == null ? [] : commodityImg.WzProperties
                 .Where(p => SnOfEntry(p) is { } v && SnTab(v) is { } t && gone.Contains(t))
                 .ToList();
+            using var edit = new EditScope(entry).Watch(img).Watch(commodityImg);
             var packageRefs = commodity.Count > 0 ? RemoveCommodityEntries(entry, commodityImg!, commodity) : 0;
 
             foreach (var p in props) p.Remove();
             RenumberCategories(img);
             Touch(entry);
+            Record($"Delete {props.Count} sub tabs", edit.Finish());
             return new CategoryResult(CategoryTableOf(img), Describe(id, entry), commodity.Count, packageRefs);
         }
     }

@@ -69,14 +69,25 @@ public sealed partial class WzService
             // DXT works on 4x4 blocks. Transparent padding on the right and bottom keeps the sprite where it was,
             // since the origin is measured from the top-left.
             if (format is WzPngFormat.Format1026 or WzPngFormat.Format2050) image = PadTo4(image);
-            canvas.PngProperty.SetCompressedBytes(Encode(image, format), image.Width, image.Height, format);
-            foreach (var link in new[] { WzCanvasProperty.InlinkPropertyName, WzCanvasProperty.OutlinkPropertyName })
-                canvas[link]?.Remove();
-
+            using var edit = new EditScope(entry).Watch(canvas);
+            ReplacePicture(canvas, image, format);
             MarkChanged(canvas);
             Touch(entry);
+            Record($"Replace picture {canvas.Name}", edit.Finish());
             return new NodeEditResult(path, Describe(canvas), Describe(id, entry));
         }
+    }
+
+    /// <summary>
+    /// Gives a canvas a picture of its own, in place of any it links to. The old one is left as it was, for undoing.
+    /// </summary>
+    private static void ReplacePicture(WzCanvasProperty canvas, Pixels image, WzPngFormat format)
+    {
+        var picture = new WzPngProperty();
+        picture.SetCompressedBytes(Encode(image, format), image.Width, image.Height, format);
+        canvas.PngProperty = picture;
+        foreach (var link in new[] { WzCanvasProperty.InlinkPropertyName, WzCanvasProperty.OutlinkPropertyName })
+            canvas[link]?.Remove();
     }
 
     /// <summary>The name the API and web app use for a canvas' pixel format.</summary>

@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { DEFAULT_API_BASE } from "../lib/api";
 import { useConnection, type ConnectionStatus } from "../lib/connection";
 import { useActions, useWorkspaceData } from "../lib/workspace";
+import { HistoryWindow } from "./history-window";
 import { FileMenu } from "./file-menu";
 import { Moon, Sliders, Sun, XMark } from "./icons";
 import { XmlExportDialog } from "./xml-export-dialog";
@@ -196,6 +197,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
             <main className="relative min-h-0 flex-1">{children}</main>
 
+            <HistoryWindow />
             <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
             <XmlExportDialog open={xmlOpen} onClose={() => setXmlOpen(false)} />
         </div>

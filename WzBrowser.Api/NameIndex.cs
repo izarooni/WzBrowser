@@ -34,6 +34,21 @@ public sealed class NameIndex : IDisposable
         return result;
     }
 
+    /// <summary>The entries whose id or name contains the text, by id.</summary>
+    public List<KeyValuePair<int, string>> Search(string kind, string text, int limit)
+    {
+        lock (_lock)
+            return Kind(kind)
+                .Where(Matches)
+                .OrderBy(entry => entry.Key)
+                .Take(limit)
+                .ToList();
+
+        bool Matches(KeyValuePair<int, string> entry) =>
+            entry.Value.Contains(text, StringComparison.OrdinalIgnoreCase)
+            || entry.Key.ToString("D7").Contains(text);
+    }
+
     private Dictionary<int, string> Kind(string kind)
     {
         if (_kinds.TryGetValue(kind, out var cached)) return cached;

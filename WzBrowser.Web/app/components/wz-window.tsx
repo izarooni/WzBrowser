@@ -1,12 +1,13 @@
-import { memo, useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
+import { memo, useEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
 import { useConnection } from "../lib/connection";
 import type { OpenedFile } from "../lib/api";
 import { LibraryScopeProvider, tableTopOf, type TableTop } from "../lib/library-api";
 import { MIN_H, MIN_W, useActions, useWorkspaceData, type Win } from "../lib/workspace";
-import { Archive, Download, Minus, Plus, Undo, XMark } from "./icons";
+import { Archive, Download, Maximize, Minus, Plus, Restore, Undo, XMark } from "./icons";
 import { CanvasGallery } from "./canvas-gallery";
 import { CharacterBrowser } from "./character-browser";
 import { CommodityEditor } from "./commodity-editor";
+import { MapEditor } from "./map-editor";
 import { MapTable } from "./map-table";
 import { MobLocationTable } from "./mob-locations";
 import { MobTable } from "./mob-table";
@@ -48,11 +49,15 @@ function mainLabelOf(kind: OpenedFile["kind"] | undefined) {
         case "character":
         case "item": return "Thumbnails";
         case "skill": return "Skills";
+        case "map": return "Map editor";
         default: return null;
     }
 }
 
-/** A file's own view: the quest browser, the _Canvas gallery, the Character/Item/Skill thumbnails, or Commodity. */
+/**
+ * A file's own view: the quest browser, the _Canvas gallery, the Character/Item/Skill thumbnails, the map editor, or
+ * Commodity.
+ */
 function MainView({ file, onOpenRaw }: { file: OpenedFile; onOpenRaw?: (path: string) => void }) {
     switch (file.kind) {
         case "quest":
@@ -63,20 +68,35 @@ function MainView({ file, onOpenRaw }: { file: OpenedFile; onOpenRaw?: (path: st
         case "item":
         case "skill":
             return <CharacterBrowser fileId={file.id} kind={file.kind} revision={file.revision} onOpenRaw={onOpenRaw} />;
+        case "map":
+            return <MapEditor fileId={file.id} revision={file.revision} onOpenRaw={onOpenRaw} />;
         default:
             return <CommodityEditor fileId={file.id} revision={file.revision} onOpenRaw={onOpenRaw} />;
     }
 }
 
 
-/** A floating, draggable, resizable window showing one open WZ file. */
-export const WzWindow = memo(function WzWindow({ win, focused }: { win: Win; focused: boolean }) {
+/**
+ * A floating, draggable, resizable window showing one open WZ file. `pan` is where the canvas is, for a maximized window
+ * to stay over the visible part of it; null for any other.
+ */
+export const WzWindow = memo(function WzWindow({ win, focused, pan }: {
+    win: Win;
+    focused: boolean;
+    pan: { x: number; y: number } | null;
+}) {
     const actions = useActions();
     const { files } = useWorkspaceData();
     const connection = useConnection();
     const { browseOnly } = connection;
     const file = files[win.fileId];
     const gesture = useRef<Gesture | null>(null);
+    const toggleMaximized = () =>
+        actions.patchWindow(win.fileId, { maximized: win.collapsed || !win.maximized, collapsed: false });
+    let place: CSSProperties;
+    // Sized by CSS, so it follows the page as that's resized.
+    if (pan) place = { left: -pan.x, top: -pan.y, width: "100%", height: "100%" };
+    else place = { left: win.x, top: win.y, width: win.w, height: win.collapsed ? undefined : win.h };
     // Quest archives open on the quest browser, Etc.wz on the Commodity table, and _Canvas and Character files on their
     // thumbnails; the raw tree is one tab away.
     const mainLabel = mainLabelOf(file?.kind);
@@ -153,25 +173,27 @@ export const WzWindow = memo(function WzWindow({ win, focused }: { win: Win; foc
         <section
             aria-label={file?.name ?? "WZ file"}
             onPointerDownCapture={() => actions.focusWindow(win.fileId)}
-            style={{ left: win.x, top: win.y, width: win.w, height: win.collapsed ? undefined : win.h, zIndex: win.z }}
-            className={`absolute flex flex-col rounded-2xl border bg-white transition-shadow dark:bg-zinc-900 ${
+            style={{ ...place, zIndex: win.z }}
+            className={`pointer-events-auto absolute flex flex-col border ${pan ? "" : "rounded-2xl"} bg-white transition-shadow dark:bg-zinc-900 ${
                 focused
                     ? "border-accent-400/70 shadow-2xl shadow-zinc-900/20 ring-1 ring-accent-400/40 dark:shadow-black/60"
                     : "border-zinc-200 shadow-lg shadow-zinc-900/10 dark:border-zinc-800 dark:shadow-black/40"
             }`}
         >
             {/* Clipping lives here, not on the frame, so the resize handles can overhang the rounded border. */}
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[15px]">
+            <div className={`flex min-h-0 flex-1 flex-col overflow-hidden ${pan ? "" : "rounded-[15px]"}`}>
             <header
                 onPointerDown={(e) => {
-                    if ((e.target as HTMLElement).closest("button")) return;
+                    if (pan || (e.target as HTMLElement).closest("button")) return;
                     begin(e, { kind: "move", sx: e.clientX, sy: e.clientY, x: win.x, y: win.y });
                 }}
                 onPointerMove={track}
                 onPointerUp={end}
                 onPointerCancel={end}
-                onDoubleClick={(e) => { if (!(e.target as HTMLElement).closest("button")) actions.patchWindow(win.fileId, { collapsed: !win.collapsed }); }}
-                className="flex h-14 shrink-0 cursor-grab touch-none select-none items-center gap-3 border-b border-zinc-100 bg-zinc-50/80 px-4 active:cursor-grabbing dark:border-zinc-800 dark:bg-zinc-950/50"
+                onDoubleClick={(e) => { if (!(e.target as HTMLElement).closest("button")) toggleMaximized(); }}
+                className={`flex h-14 shrink-0 touch-none select-none items-center gap-3 border-b border-zinc-100 bg-zinc-50/80 px-4 dark:border-zinc-800 dark:bg-zinc-950/50 ${
+                    pan ? "" : "cursor-grab active:cursor-grabbing"
+                }`}
             >
                 <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent-50 text-accent-600 dark:bg-accent-600/15 dark:text-accent-400">
                     <Archive className="size-4" />
@@ -203,6 +225,10 @@ export const WzWindow = memo(function WzWindow({ win, focused }: { win: Win; foc
                 <button type="button" onClick={() => actions.patchWindow(win.fileId, { collapsed: !win.collapsed })}
                     aria-label={win.collapsed ? "Expand window" : "Collapse window"} className="btn-icon">
                     {win.collapsed ? <Plus className="size-4" /> : <Minus className="size-4" />}
+                </button>
+                <button type="button" onClick={toggleMaximized}
+                    aria-label={pan ? "Restore window" : "Maximize window"} title={pan ? "Restore" : "Maximize"} className="btn-icon">
+                    {pan ? <Restore className="size-4" /> : <Maximize className="size-4" />}
                 </button>
                 <button type="button" onClick={() => void actions.closeWindow(win.fileId)} aria-label="Close file" className="btn-icon hover:bg-rose-100 hover:text-rose-700 dark:hover:bg-rose-500/20">
                     <XMark className="size-4" />
@@ -251,7 +277,7 @@ export const WzWindow = memo(function WzWindow({ win, focused }: { win: Win; foc
             )}
             </div>
 
-            {!win.collapsed && (
+            {!win.collapsed && !pan && (
                 <>
                     {handle(true, false, "-right-1.5 top-14 bottom-4 w-3 cursor-ew-resize")}
                     {handle(false, true, "-bottom-1.5 left-4 right-4 h-3 cursor-ns-resize")}

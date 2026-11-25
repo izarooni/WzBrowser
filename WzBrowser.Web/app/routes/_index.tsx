@@ -3,7 +3,7 @@ import { useRef, type PointerEvent, type WheelEvent } from "react";
 import { Squares } from "../components/icons";
 import { WzWindow } from "../components/wz-window";
 import { useConnection } from "../lib/connection";
-import { useActions, useLayout } from "../lib/workspace";
+import { useActions, useLayout, type Win } from "../lib/workspace";
 
 export const meta: MetaFunction = () => [{ title: "WzBrowser" }];
 
@@ -16,6 +16,9 @@ export default function Workspace() {
 
     const focusedId = wins.reduce<{ id: string; z: number } | null>((best, w) => (!best || w.z > best.z ? { id: w.fileId, z: w.z } : best), null)?.id;
 
+    const isMaximized = (win: Win) => win.maximized && !win.collapsed;
+    const coversCanvas = wins.some((win) => win.fileId === focusedId && isMaximized(win));
+
     // Set when a middle-button pan moved, so the auxclick that follows doesn't open a link the drag began on.
     const middleDragged = useRef(false);
 
@@ -26,6 +29,8 @@ export default function Workspace() {
     // Middle-button drag pans from anywhere, windows included: caught on the way down so windows never see it.
     const onPointerDownCapture = (e: PointerEvent<HTMLDivElement>) => {
         if (e.button !== 1) return;
+        // The map editor's canvas has a view of its own to drag.
+        if ((e.target as Element).closest("[data-own-pan]")) return;
         e.preventDefault();
         e.stopPropagation();
         middleDragged.current = false;
@@ -65,8 +70,11 @@ export default function Workspace() {
             style={{ backgroundPosition: `${pan.x}px ${pan.y}px` }}
             className="canvas-dots absolute inset-0 cursor-grab touch-none overflow-hidden active:cursor-grabbing"
         >
-            <div className="absolute left-0 top-0" style={{ transform: `translate(${pan.x}px, ${pan.y}px)` }}>
-                {wins.map((w) => <WzWindow key={w.fileId} win={w} focused={w.fileId === focusedId} />)}
+            {/* As large as the canvas, for maximized windows to fill; clicks beside the windows go through to it. */}
+            <div className="pointer-events-none absolute inset-0" style={{ transform: `translate(${pan.x}px, ${pan.y}px)` }}>
+                {wins.map((w) => (
+                    <WzWindow key={w.fileId} win={w} focused={w.fileId === focusedId} pan={isMaximized(w) ? pan : null} />
+                ))}
             </div>
 
             {wins.length === 0 && (
@@ -93,7 +101,7 @@ export default function Workspace() {
                 </div>
             )}
 
-            <div className="pointer-events-none absolute bottom-6 left-6 flex items-center gap-3">
+            <div className={`pointer-events-none absolute bottom-6 left-6 items-center gap-3 ${coversCanvas ? "hidden" : "flex"}`}>
                 <button
                     type="button"
                     onClick={actions.tidy}

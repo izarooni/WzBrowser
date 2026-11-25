@@ -32,6 +32,7 @@ public sealed partial class WzService
 
         // String first, so a String that can't be changed leaves the node in place. Its lock isn't held with this file's.
         var removed = new List<StringsDeleted>();
+        var edits = new List<FileEdit?>();
         if (names is ({ } image, { Count: > 0 } ids))
         {
             foreach (var (fileId, stringEntry, img) in StringImages(entry.Path, image))
@@ -41,10 +42,12 @@ public sealed partial class WzService
                     var hits = new List<WzSubProperty>();
                     CollectStringEntries(img.WzProperties, ids, hits);
                     if (hits.Count == 0) continue;
+                    using var stringEdit = new EditScope(stringEntry).Watch(img);
                     var paths = hits.Select(PathInImage).ToList();
                     foreach (var hit in hits) hit.Remove();
                     img.Changed = true;
                     Touch(stringEntry);
+                    edits.Add(stringEdit.Finish());
                     stringEntry.Hidden = false;
                     removed.Add(new StringsDeleted(Describe(fileId, stringEntry), paths));
                 }
@@ -55,9 +58,12 @@ public sealed partial class WzService
         {
             // Looked up again: it may have gone while the lock was released.
             var node = Resolve(entry.File, path);
+            using var edit = new EditScope(entry).Watch((node as WzObject)?.Parent);
             MarkChanged(node);
             ((WzObject)node).Remove();
             Touch(entry);
+            edits.Add(edit.Finish());
+            Record($"Delete {((WzObject)node).Name}", edits);
             return new NodeDeleteResult(Describe(id, entry), removed);
         }
     }

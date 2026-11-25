@@ -19,7 +19,8 @@ public record NodeDto(
 /// one {id}.img per quest), "etc" for one with
 /// Commodity.img at the root (Etc.wz), "canvas" for a modular install's picture file
 /// (Data/Mob/_Canvas/_Canvas_000.wz), "character" for Character.wz or one of its modular parts, "item" for Item.wz or
-/// one of its, "skill" for Skill.wz or one of its, otherwise "generic".</param>
+/// one of its, "skill" for Skill.wz or one of its, "map" for Map.wz or a modular part holding maps, otherwise
+/// "generic".</param>
 /// <param name="Revision">Changes whenever the file's contents change (paste, delete, revert) so views know to refetch.</param>
 /// <param name="Top">The classic file this one is or is part of ("Mob" for Mob.wz, Mob2.wz, Data/Mob/Mob_000.wz or
 /// Packs/Mob_000.ms).</param>
@@ -253,6 +254,8 @@ public sealed partial class WzService(string? root = null)
         public MsPackLayout? MsLayout { get; set; }
         /// <summary>Equipment id -> "Category/00000000.img", built the first time an equip is looked up.</summary>
         public Dictionary<int, string>? EquipIndex { get; set; }
+        /// <summary>The edit being made (see <see cref="EditScope"/>).</summary>
+        public EditScope? Edit { get; set; }
     }
 
     /// <summary>Records that the file's contents changed.</summary>
@@ -317,6 +320,7 @@ public sealed partial class WzService(string? root = null)
         if (IsCharacterFile(path)) return "character";
         if (IsItemFile(path)) return "item";
         if (IsSkillFile(path)) return "skill";
+        if (IsMapFile(path, root)) return "map";
         return "generic";
     }
 
@@ -415,6 +419,7 @@ public sealed partial class WzService(string? root = null)
         lock (entry.Lock)
         {
             entry.Closed = true;
+            ForgetHistory(entry);
             entry.Names?.Dispose();
             entry.File.Dispose();
         }
@@ -555,11 +560,15 @@ public sealed partial class WzService(string? root = null)
         {
             var node = Resolve(entry.File, path);
             if (node is WzImageProperty prop && prop.GetLinkedWzImageProperty() is WzBinaryProperty sound)
-                return sound.IsWaveFile
-                    ? new SoundData(sound.GetBytesForWAVPlayback(), "audio/wav")
-                    : new SoundData(sound.GetBytes(false), "audio/mpeg");
+                return SoundOf(sound);
             throw new KeyNotFoundException("Node is not a sound.");
         }
+    }
+
+    private static SoundData SoundOf(WzBinaryProperty sound)
+    {
+        if (sound.IsWaveFile) return new SoundData(sound.GetBytesForWAVPlayback(), "audio/wav");
+        return new SoundData(sound.GetBytes(false), "audio/mpeg");
     }
 
     // ---------------------------------------------------------------- helpers
@@ -610,6 +619,10 @@ public sealed partial class WzService(string? root = null)
         var node = Resolve(source.File, sourcePath);
         var destination = Resolve(target.File, targetPath);
         object container = destination is WzFile f ? f.WzDirectory : destination;
+        using var edit = new EditScope(target).Watch(container);
+        // The same file's is part of the target's.
+        using var sourceEdit = new EditScope(source);
+        if (req.Move) sourceEdit.Watch((node as WzObject)?.Parent);
 
         if (req.Move && ReferenceEquals(source, target) &&
             (targetPath == sourcePath || targetPath.StartsWith(sourcePath + "/", StringComparison.Ordinal)))
@@ -658,6 +671,7 @@ public sealed partial class WzService(string? root = null)
             Touch(source);
             if (!ReferenceEquals(source, target)) sourceDto = Describe(req.SourceId, source);
         }
+        Record($"{(req.Move ? "Move" : "Paste")} {((WzObject)node).Name}", edit.Finish(), sourceEdit.Finish());
 
         return new PasteResult(newPath, Describe(added), Describe(targetId, target), sourceDto);
     }
@@ -687,12 +701,14 @@ public sealed partial class WzService(string? root = null)
             else name = null;
             if (name == null && req.Value == null) throw new ArgumentException("Nothing to change.");
 
+            using var edit = new EditScope(entry).Watch(prop);
             // SetValue parses before storing anything, so a bad value throws before the rename below.
             if (req.Value != null) SetValue(prop, req.Value);
             if (name != null) prop.Name = name;
 
             MarkChanged(prop);
             Touch(entry);
+            Record(req.Value != null ? $"Set {prop.Name}" : $"Rename to {prop.Name}", edit.Finish());
             var parent = path.Contains('/') ? path[..path.LastIndexOf('/')] : "";
             return new NodeEditResult(Join(parent, prop.Name), Describe(prop), Describe(id, entry));
         }
@@ -733,9 +749,11 @@ public sealed partial class WzService(string? root = null)
             if (parent is WzConvexProperty && prop is not WzExtended)
                 throw new InvalidDataException($"A convex property can't hold a {type}; add a vector, link or sub-property instead.");
 
+            using var edit = new EditScope(entry).Watch(parent);
             parent.AddProperty(prop);
             MarkChanged(parent);
             Touch(entry);
+            Record($"Add {prop.Name}", edit.Finish());
             return new NodeEditResult(Join(path, prop.Name), Describe(prop), Describe(id, entry));
         }
     }
@@ -780,6 +798,7 @@ public sealed partial class WzService(string? root = null)
             }
             entry.File.Dispose();
             entry.File = saved;
+            ForgetHistory(entry);
             entry.Revision = NextRevision();
 
             entry.Dirty = false;
@@ -826,6 +845,7 @@ public sealed partial class WzService(string? root = null)
         }
         entry.File.Dispose();
         entry.File = saved;
+        ForgetHistory(entry);
         entry.MsLayout = savedLayout;
         entry.Revision = NextRevision();
         entry.Dirty = false;

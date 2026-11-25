@@ -83,6 +83,7 @@ public sealed partial class WzService
         var img = entry.File.WzDirectory.GetImageByName(CashPackageImg);
         if (img == null) return 0;
         if (!img.Parsed) img.ParseImage();
+        entry.Edit?.Watch(img);
 
         var changed = 0;
         foreach (var package in img.WzProperties)

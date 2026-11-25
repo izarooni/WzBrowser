@@ -15,14 +15,18 @@ import { parentPath } from "../lib/paths";
 import { EDITABLE, invalid } from "../lib/values";
 import { useActions, useWorkspaceData } from "../lib/workspace";
 import { InlineEdit } from "./node-tree";
+import { PropertyRow } from "./property-row";
 import { PaneResizer, usePaneWidth, type PaneWidth } from "./pane-resizer";
 import { SizePicker, SIZES, Thumbnail, useThumbnailSize } from "./canvas-gallery";
 import { Photo, Search, XMark } from "./icons";
 
 type Kind = "character" | "item" | "skill";
 
-/** Saves a value at a path in the file; resolves false when the save failed. */
-type EditValue = (path: string, value: string) => Promise<boolean>;
+/** Changes to the property at a path in the file. `set` resolves false when the save failed. */
+interface PropertyEdits {
+    set: (path: string, value: string) => Promise<boolean>;
+    remove: (path: string) => void;
+}
 
 interface Listing extends CharacterItems {
     section: string;
@@ -458,9 +462,12 @@ function Details({ pane, fileId, kind, revision, section, item, onOpenRaw, onClo
     const { tree: info, error: infoError } = usePropTree(api.characterInfo, fileId, item.path, revision);
     // Where the info's values are in the file, to edit them: an item's info node, or the skill itself.
     const infoPath = kind === "skill" ? item.path : `${item.path}/info`;
-    const editValue: EditValue | undefined = readOnly
+    const propertyEdits: PropertyEdits | undefined = readOnly
         ? undefined
-        : (path, value) => actions.editNode(fileId, path, { value });
+        : {
+            set: (path, value) => actions.editNode(fileId, path, { value }),
+            remove: (path) => void actions.deleteNode(fileId, path, fileName(path), { unasked: true }),
+        };
     const levelPaths = useMemo(
         () => (kind === "skill" ? levelTextPaths(info, infoPath, item.texts) : new Map<string, string>()),
         [kind, info, infoPath, item.texts],
@@ -518,7 +525,7 @@ function Details({ pane, fileId, kind, revision, section, item, onOpenRaw, onClo
                 info={info}
                 error={infoError}
                 path={infoPath}
-                onEdit={editValue}
+                edits={propertyEdits}
                 levelTexts={{ paths: levelPaths, values: texts, onOpen: openText }}
             />
         </section>
@@ -553,7 +560,7 @@ function Details({ pane, fileId, kind, revision, section, item, onOpenRaw, onClo
             {/* A skill's properties run long (a set of values per level), so its name and description come first. */}
             {kind !== "skill" && infoSection}
             {kind === "item" && (
-                <SpecSection fileId={fileId} path={item.path} revision={revision} onEdit={editValue} />
+                <SpecSection fileId={fileId} path={item.path} revision={revision} edits={propertyEdits} />
             )}
             <div className={`flex flex-col gap-3 p-4 ${DIVIDER}`}>
                 <dl className="space-y-2">
@@ -666,27 +673,27 @@ function OtherTexts({ kind, texts, onOpen }: {
 }
 
 /** The details' info: loading, an error, nothing, a skill's properties, or an item's info. */
-function InfoSection({ kind, info, error, path, onEdit, levelTexts }: {
+function InfoSection({ kind, info, error, path, edits, levelTexts }: {
     kind: Kind;
     info: PropTree | null | undefined;
     error: string | null;
     path: string;
-    onEdit?: EditValue;
+    edits?: PropertyEdits;
     levelTexts: LevelTexts;
 }) {
     if (error) return <p className="error-text text-xs">{error}</p>;
     if (info === undefined) return <div className="space-y-1.5"><Skeleton rows={4} className="h-4" /></div>;
     if (info === null) return <p className="text-xs text-zinc-400">This has no info.</p>;
-    if (kind === "skill") return <SkillProperties info={info} path={path} onEdit={onEdit} levelTexts={levelTexts} />;
-    return <InfoView info={info} path={path} onEdit={onEdit} />;
+    if (kind === "skill") return <SkillProperties info={info} path={path} edits={edits} levelTexts={levelTexts} />;
+    return <InfoView info={info} path={path} edits={edits} />;
 }
 
 /** What using an item does (its spec), every value editable in place unless read only; nothing when it has no spec. */
-function SpecSection({ fileId, path, revision, onEdit }: {
+function SpecSection({ fileId, path, revision, edits }: {
     fileId: string;
     path: string;
     revision: number;
-    onEdit?: EditValue;
+    edits?: PropertyEdits;
 }) {
     const { api } = useConnection();
     const { tree: spec, error } = usePropTree(api.characterSpec, fileId, path, revision);
@@ -700,7 +707,7 @@ function SpecSection({ fileId, path, revision, onEdit }: {
             <InfoNodes
                 nodes={properties}
                 path={`${path}/spec`}
-                onEdit={onEdit}
+                edits={edits}
                 className="space-y-0.5 font-mono"
             />
         </section>
@@ -711,10 +718,10 @@ function SpecSection({ fileId, path, revision, onEdit }: {
  * A skill's properties (common, level/1, ..., its flags), every value editable in place unless the server is read
  * only. Each level starts with String's text for it (hN).
  */
-function SkillProperties({ info, path, onEdit, levelTexts }: {
+function SkillProperties({ info, path, edits, levelTexts }: {
     info: PropTree;
     path: string;
-    onEdit?: EditValue;
+    edits?: PropertyEdits;
     levelTexts: LevelTexts;
 }) {
     function lead(nodePath: string) {
@@ -727,7 +734,7 @@ function SkillProperties({ info, path, onEdit, levelTexts }: {
     return (
         <div className="space-y-1.5 text-[12px]">
             <h3 className={HEADING}>Properties</h3>
-            <InfoNodes nodes={properties} path={path} onEdit={onEdit} lead={lead} className="space-y-0.5 font-mono" />
+            <InfoNodes nodes={properties} path={path} edits={edits} lead={lead} className="space-y-0.5 font-mono" />
         </div>
     );
 }
@@ -826,13 +833,12 @@ function otherRows(values: Record<string, number>) {
 
 /**
  * An item's info as the game words it (flags, requirements, what it adds, price), then every value as written, each
- * editable in place when `onEdit` is given. `path` is the info node's in the file.
+ * editable in place when `edits` is given. `path` is the info node's in the file.
  */
-function InfoView({ info, path, onEdit }: { info: PropTree; path: string; onEdit?: EditValue }) {
+function InfoView({ info, path, edits }: { info: PropTree; path: string; edits?: PropertyEdits }) {
     const values = numbers(info);
     const flags = FLAGS.filter(([key]) => values[key]);
     const all = shownChildren(info);
-    const summary = "cursor-pointer select-none hover:text-zinc-600 dark:hover:text-zinc-300";
 
     return (
         <div className="space-y-4">
@@ -849,15 +855,10 @@ function InfoView({ info, path, onEdit }: { info: PropTree; path: string; onEdit
             <Group title="Stats">{bonusRows(values)}</Group>
             <Group title="Other">{otherRows(values)}</Group>
             {all.length > 0 && (
-                <details className="text-[12px]">
-                    <summary className={`${HEADING} ${summary}`}>
-                        All info ({all.length})
-                        {onEdit && (
-                            <span className="font-normal normal-case tracking-normal"> · click a value to edit</span>
-                        )}
-                    </summary>
-                    <InfoNodes nodes={all} path={path} onEdit={onEdit} className="mt-1.5 space-y-0.5 font-mono" />
-                </details>
+                <div className="space-y-1.5 text-[12px]">
+                    <h3 className={HEADING}>Info</h3>
+                    <InfoNodes nodes={all} path={path} edits={edits} className="space-y-0.5 font-mono" />
+                </div>
             )}
         </div>
     );
@@ -867,10 +868,10 @@ function InfoView({ info, path, onEdit }: { info: PropTree; path: string; onEdit
 type Lead = (path: string) => ReactNode;
 
 /** Raw values below `path`, as a list, after what `lead` gives for `path`. */
-function InfoNodes({ nodes, path, onEdit, lead, className }: {
+function InfoNodes({ nodes, path, edits, lead, className }: {
     nodes: PropTree[];
     path: string;
-    onEdit?: EditValue;
+    edits?: PropertyEdits;
     lead?: Lead;
     className: string;
 }) {
@@ -878,29 +879,32 @@ function InfoNodes({ nodes, path, onEdit, lead, className }: {
         <ul className={className}>
             {lead?.(path)}
             {nodes.map((node) => (
-                <InfoNode key={node.name} node={node} path={`${path}/${node.name}`} onEdit={onEdit} lead={lead} />
+                <InfoNode key={node.name} node={node} path={`${path}/${node.name}`} edits={edits} lead={lead} />
             ))}
         </ul>
     );
 }
 
 /**
- * One raw value at `path`, editable in place when `onEdit` is given and its type holds a value, with what's below it
+ * One raw value at `path`, editable in place when `edits` is given and its type holds a value, with what's below it
  * indented.
  */
-function InfoNode({ node, path, onEdit, lead }: { node: PropTree; path: string; onEdit?: EditValue; lead?: Lead }) {
+function InfoNode({ node, path, edits, lead }: { node: PropTree; path: string; edits?: PropertyEdits; lead?: Lead }) {
     const children = shownChildren(node);
     return (
         <li>
-            <span className="flex items-baseline justify-between gap-3">
-                <span className="shrink-0 truncate text-zinc-500" title={`${node.type} · ${path}`}>{node.name}</span>
-                <InfoValue node={node} path={path} onEdit={onEdit} />
-            </span>
+            <PropertyRow
+                name={node.name}
+                title={`${node.type} · ${path}`}
+                onDelete={edits && (() => edits.remove(path))}
+            >
+                <InfoValue node={node} path={path} edits={edits} />
+            </PropertyRow>
             {children.length > 0 && (
                 <InfoNodes
                     nodes={children}
                     path={path}
-                    onEdit={onEdit}
+                    edits={edits}
                     lead={lead}
                     className="ml-3 space-y-0.5 border-l border-zinc-100 pl-2 dark:border-zinc-800"
                 />
@@ -909,9 +913,9 @@ function InfoNode({ node, path, onEdit, lead }: { node: PropTree; path: string; 
     );
 }
 
-function InfoValue({ node, path, onEdit }: { node: PropTree; path: string; onEdit?: EditValue }) {
+function InfoValue({ node, path, edits }: { node: PropTree; path: string; edits?: PropertyEdits }) {
     if (node.value == null || node.children) return null;
-    if (!onEdit || !EDITABLE.has(node.type))
+    if (!edits || !EDITABLE.has(node.type))
         return <span className="break-all text-right text-zinc-800 dark:text-zinc-200">{node.value}</span>;
     return (
         <span className="min-w-0 flex-1 text-right text-zinc-800 dark:text-zinc-200">
@@ -921,7 +925,7 @@ function InfoValue({ node, path, onEdit }: { node: PropTree; path: string; onEdi
                 value={node.value}
                 multiline={node.type === "string"}
                 check={(value) => invalid(node.type, value)}
-                onSave={(value) => onEdit(path, value)}
+                onSave={(value) => edits.set(path, value)}
             />
         </span>
     );

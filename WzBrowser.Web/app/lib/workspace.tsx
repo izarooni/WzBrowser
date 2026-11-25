@@ -10,8 +10,18 @@ import { errorMessage } from "./errors";
 
 // ------------------------------------------------------------------ windows
 
-export interface Win { fileId: string; x: number; y: number; w: number; h: number; z: number; collapsed: boolean }
-type Layout = Pick<Win, "x" | "y" | "w" | "h" | "collapsed">;
+export interface Win {
+    fileId: string;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    z: number;
+    collapsed: boolean;
+    /** Fills the canvas, keeping its place and size for when it's restored. */
+    maximized: boolean;
+}
+type Layout = Pick<Win, "x" | "y" | "w" | "h" | "collapsed" | "maximized">;
 
 interface State { wins: Win[]; zTop: number; pan: { x: number; y: number } }
 
@@ -50,7 +60,7 @@ function reducer(s: State, a: Action): State {
             return {
                 ...s,
                 pan: { x: 0, y: 0 },
-                wins: s.wins.map((w, i) => ({ ...w, x: 32 + (i % 10) * 36, y: 32 + (i % 10) * 36, collapsed: false })),
+                wins: s.wins.map((w, i) => ({ ...w, x: 32 + (i % 10) * 36, y: 32 + (i % 10) * 36, collapsed: false, maximized: false })),
             };
     }
 }
@@ -107,9 +117,15 @@ interface Actions {
     paste: (targetFileId: string, targetPath: string, src: ClipItem | ClipItem[], move: boolean) => Promise<void>;
     /**
      * Asks, then deletes a node. `strings`: also delete String's names for it, opening each String file changed (this
-     * file's window stays in front); `body` replaces the dialog's text. Resolves true once deleted.
+     * file's window stays in front); `body` replaces the dialog's text; `unasked` deletes without asking. Resolves true
+     * once deleted.
      */
-    deleteNode: (fileId: string, path: string, name: string, opts?: { strings?: boolean; body?: string }) => Promise<boolean>;
+    deleteNode: (
+        fileId: string,
+        path: string,
+        name: string,
+        opts?: { strings?: boolean; body?: string; unasked?: boolean },
+    ) => Promise<boolean>;
     /** Renames a property and/or sets its value, then selects it at its (possibly new) path. False if it failed. */
     editNode: (fileId: string, path: string, edit: NodeEdit) => Promise<boolean>;
     /** Adds a property under `parent` and reveals it. Resolves false when the server refused it. */
@@ -131,6 +147,8 @@ interface Actions {
     showWindow: (fileId: string) => void;
     /** Records an edit made by a view other than the raw tree: updates the file and refreshes those tree folders. */
     edited: (file: OpenedFile, reload: string[]) => void;
+    /** Records that files changed in ways that aren't known here (undoing), and refreshes their trees. */
+    refreshed: (files: OpenedFile[]) => void;
     /** Follows a link from a quest archive: opens the file holding the item/NPC/mob/map/skill and reveals it there. */
     followRef: (questFileId: string, kind: LookupKind, id: number) => Promise<void>;
     toast: (kind: Toast["kind"], text: string) => void;
@@ -181,7 +199,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         if (!loaded.current) return;
         const t = setTimeout(() => {
             const wins: Record<string, Layout> = { ...layouts.current };
-            for (const w of state.wins) wins[w.fileId] = { x: w.x, y: w.y, w: w.w, h: w.h, collapsed: w.collapsed };
+            for (const w of state.wins) {
+                const { x, y, w: width, h: height, collapsed, maximized } = w;
+                wins[w.fileId] = { x, y, w: width, h: height, collapsed, maximized };
+            }
             layouts.current = wins;
             try { localStorage.setItem(LAYOUT_KEY, JSON.stringify({ pan: state.pan, wins })); } catch { /* not persisted */ }
         }, 300);
@@ -224,6 +245,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         const w = s.wins.find((x) => x.fileId === fileId);
         if (!w) return;
         dispatch({ type: "focus", id: fileId });
+        if (w.maximized && !w.collapsed) return;
         // Keep the title bar in view: if the window sits (mostly) off screen, pan so it's near the top left.
         const sx = w.x + s.pan.x, sy = w.y + s.pan.y;
         if (sx < 0 || sy < 0 || sx > window.innerWidth - 240 || sy > window.innerHeight - 160)
@@ -258,6 +280,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             w: width,
             h: height,
             collapsed: false,
+            maximized: false,
         };
         dispatch({ type: "add", fileId: file.id, layout });
     }, []);
@@ -340,6 +363,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         emit(file.id, { reload });
     }, [upsert, emit]);
 
+    const refreshed = useCallback<Actions["refreshed"]>((changed) => {
+        upsert(...changed);
+        for (const file of changed) emit(file.id, { reloadUnder: "" });
+    }, [upsert, emit]);
+
     const confirm = useCallback((opts: ConfirmOptions) => new Promise<boolean>((resolve) => setConfirmState({ opts, resolve })), []);
     const answer = (v: boolean) => { confirmState?.resolve(v); setConfirmState(null); };
 
@@ -391,7 +419,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }, [api, upsert, emit, toast]);
 
     const deleteNode = useCallback<Actions["deleteNode"]>(async (fileId, path, name, opts) => {
-        const ok = await confirm({
+        const ok = opts?.unasked || await confirm({
             title: `Delete “${name}”?`,
             body: opts?.body ?? "It is removed from the open file in memory only. Nothing on disk changes until you save, and you can discard all edits with Revert.",
             confirmLabel: "Delete",
@@ -510,8 +538,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         tidy: () => dispatch({ type: "tidy" }),
         openPicker: () => setPickerOpen(true),
         paste, deleteNode, editNode, createNode, setCanvasImage, importZip, save, revert, subscribe, toast,
-        reveal, takePendingReveal, showWindow, followRef, edited, confirm,
-    }), [openFile, closeWindow, paste, deleteNode, editNode, createNode, setCanvasImage, importZip, save, revert, subscribe, toast, reveal, takePendingReveal, showWindow, followRef, edited, confirm]);
+        reveal, takePendingReveal, showWindow, followRef, edited, refreshed, confirm,
+    }), [openFile, closeWindow, paste, deleteNode, editNode, createNode, setCanvasImage, importZip, save, revert, subscribe, toast, reveal, takePendingReveal, showWindow, followRef, edited, refreshed, confirm]);
 
     return (
         <ActionsCtx.Provider value={actions}>

@@ -79,6 +79,7 @@ public sealed partial class WzService
                 targets.Add((sub, prop, req));
             }
 
+            using var edit = new EditScope(entry).Watch(img);
             // SN edits: remember each entry's old SN so packages can follow it, and the layout may need redoing.
             var snEdits = targets.Any(t => t.Req.Property.Equals("SN", StringComparison.OrdinalIgnoreCase));
             var oldSns = snEdits ? targets.Select(t => t.Sub).Distinct().ToDictionary(s => s, SnOfEntry) : null;
@@ -104,6 +105,7 @@ public sealed partial class WzService
                 if (moved.Count > 0) packageRefs = EditPackages(entry, sn => moved.GetValueOrDefault(sn, sn));
             }
             Touch(entry);
+            Record(sets.Count == 1 ? $"Set {sets[0].Property}" : $"Set {sets.Count} values", edit.Finish());
 
             var columns = CommodityColumns(img);
             var rows = targets.Select(t => t.Sub).Distinct().Select(s => CommodityRowOf(s, columns)).ToList();
@@ -124,8 +126,10 @@ public sealed partial class WzService
             var img = CommodityImage(entry);
             var props = entries.Distinct().Select(name =>
                 img[name] ?? throw new KeyNotFoundException($"Entry '{name}' not found in {CommodityImg}.")).ToList();
+            using var edit = new EditScope(entry).Watch(img);
             var packageRefs = RemoveCommodityEntries(entry, img, props);
             Touch(entry);
+            Record($"Delete {props.Count} commodities", edit.Finish());
             return new CommodityDeleteResult(Describe(id, entry), props.Count, packageRefs);
         }
     }
@@ -158,10 +162,12 @@ public sealed partial class WzService
                 sub.AddProperty(prop);
             }
 
+            using var edit = new EditScope(entry).Watch(img);
             img.AddProperty(sub);
             RenumberCommodity(img);
             MarkChanged(img);
             Touch(entry);
+            Record($"Add commodity {req.ItemId}", edit.Finish());
 
             columns = CommodityColumns(img);
             return new CommodityRowResult(columns, CommodityRowOf(sub, columns), Describe(id, entry));

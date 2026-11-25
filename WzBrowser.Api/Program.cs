@@ -200,6 +200,11 @@ api.MapGet("/fs/peek", (string path, WzService wz) =>
     return wz.Peek(path);
 });
 
+// ---- the timeline of edits to every file ----
+api.MapGet("/history", (WzService wz) => wz.History());
+// Undoes or redoes until that action is the last in place; 0 undoes them all.
+api.MapPost("/history/{step:long}", (long step, WzService wz) => wz.GoToHistory(step));
+
 // ---- WZ files ----
 api.MapGet("/files", (WzService wz, HttpContext ctx) => wz.List(browsableOnly: browseOnly));
 api.MapPost("/files", (OpenRequest req, WzService wz, HttpContext ctx) => wz.Open(req.Path, req.Encryption, browsableOnly: browseOnly));
@@ -231,6 +236,33 @@ api.MapGet("/files/{id}/category", (string id, WzService wz) => wz.Categories(id
 api.MapPost("/files/{id}/category", (string id, CategoryAddRequest req, WzService wz) => wz.AddCategorySub(id, req));
 api.MapPut("/files/{id}/category", (string id, CategoryRenameRequest req, WzService wz) => wz.RenameCategorySub(id, req));
 api.MapPost("/files/{id}/category/delete", (string id, List<string> entries, WzService wz) => wz.DeleteCategorySubs(id, entries));
+// The map editor: a Map file's maps, what one places, its pictures, the sets of things to
+// place, names, music and edits.
+api.MapGet("/files/{id}/maps", (string id, WzService wz) => wz.EditorMaps(id));
+api.MapGet("/files/{id}/maps/layout", (string id, string path, WzService wz) => wz.MapLayout(id, path));
+api.MapGet("/files/{id}/maps/sprite", (string id, string key, HttpContext context, WzService wz) =>
+    LibraryPng(wz.MapSprite(id, key), context));
+api.MapGet("/files/{id}/maps/sets", (string id, string kind, WzService wz) => wz.MapSets(id, kind));
+api.MapGet("/files/{id}/maps/pieces", (string id, string kind, string set, WzService wz) =>
+    wz.MapPieces(id, kind, set));
+api.MapGet("/files/{id}/maps/sprites", (string id, string[] key, WzService wz) => wz.MapSprites(id, key));
+api.MapGet("/files/{id}/maps/names", (string id, string kind, string q, WzService wz) => wz.SearchNames(id, kind, q));
+api.MapGet("/files/{id}/maps/music", (string id, string name, WzService wz) =>
+    wz.MapMusic(id, name) is { } music
+        ? Results.File(music.Bytes, music.ContentType, enableRangeProcessing: true)
+        : Results.NotFound());
+api.MapPost("/files/{id}/maps/edit", (string id, MapEditRequest request, WzService wz) => wz.EditMap(id, request));
+api.MapPost("/files/{id}/maps/create", (string id, MapCreateRequest request, WzService wz) =>
+    wz.CreateMap(id, request));
+// The body is the picture itself.
+api.MapPut("/files/{id}/maps/minimap", async (
+    string id, string path, int width, int height, int centerX, int centerY, HttpRequest request, WzService wz) =>
+{
+    using var picture = new MemoryStream();
+    await request.Body.CopyToAsync(picture);
+    return wz.SetMinimap(id, path, picture.ToArray(), width, height, centerX, centerY);
+});
+
 // Links from a quest archive (or Etc.wz) to the things it mentions (items, NPCs, mobs, maps, skills) in the neighbouring files.
 api.MapPost("/files/{id}/ref/open", (string id, RefOpenRequest req, WzService wz) => wz.OpenRef(id, req));
 api.MapGet("/files/{id}/preview", (string id, string kind, int refId, HttpContext ctx, WzService wz) =>
