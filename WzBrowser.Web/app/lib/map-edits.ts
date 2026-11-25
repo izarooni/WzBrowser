@@ -1,5 +1,5 @@
 import type { MapEdit, MapItem, MapLayout } from "./api";
-import { endNames, endsOf, numberOf, positionOf, type Grid, type Grip, type Point } from "./map-scene";
+import { endNames, endsOf, numberOf, positionOf, type Grid, type Grip, type Point, type RangeGrip } from "./map-scene";
 
 /** What the map editor's actions change, as edits for the server. */
 
@@ -98,10 +98,23 @@ function withMoved(item: MapItem, dx: number, dy: number): MapItem {
     return { ...item, values };
 }
 
+function isRangeGrip(grip: Grip): grip is RangeGrip {
+    return grip === "rx0" || grip === "rx1" || grip === "cy";
+}
+
+/** Moves one side of a mob's or NPC's range, the left one never past the right one. */
+function withMovedRange(item: MapItem, grip: RangeGrip, dx: number, dy: number): MapItem {
+    let value = numberOf(item, grip) + (grip === "cy" ? dy : dx);
+    if (grip === "rx0") value = Math.min(value, numberOf(item, "rx1"));
+    if (grip === "rx1") value = Math.max(value, numberOf(item, "rx0"));
+    return { ...item, values: { ...item.values, [grip]: String(value) } };
+}
+
 const keyOf = (point: Point) => `${point.x},${point.y}`;
 
 /** The items a drag changes, as they'd be after it. Footholds that share a moved end are stretched along. */
 export function movedItems(layout: MapLayout, items: MapItem[], grip: Grip, dx: number, dy: number): MapItem[] {
+    if (isRangeGrip(grip)) return items.map((item) => withMovedRange(item, grip, dx, dy));
     const moved: MapItem[] = [];
     const movedPoints = new Set<string>();
     for (const item of items) {

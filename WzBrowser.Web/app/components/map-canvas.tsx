@@ -375,7 +375,9 @@ export function MapCanvas({ fileId, path, mapIds, revision, onOpenRaw, onOpenMap
         const edits: MapEdit[] = [];
         for (const item of movedItems(layout, dragged, grip, dx, dy)) {
             const before = layout.items.find((candidate) => candidate.path === item.path)!;
-            edits.push(...editsBetween(before, item.kind === "life" ? standing(layout, item) : item));
+            // A side of a range goes exactly where it's dragged; the mob or NPC itself lands on a foothold.
+            const isDropped = item.kind === "life" && grip === "item";
+            edits.push(...editsBetween(before, isDropped ? standing(layout, item) : item));
         }
         await apply(labelFor("Move", dragged), edits);
     }

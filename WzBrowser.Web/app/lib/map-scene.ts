@@ -26,8 +26,11 @@ export type Grid = Box;
 /** The map point in the middle of the canvas, and how many screen pixels a map pixel takes. */
 export interface Camera extends Point { zoom: number }
 
-/** What a drag moves: the whole item, or one end of a line (or corner of a rectangle). */
-export type Grip = "item" | "start" | "end";
+/** The property that a side of a mob's or NPC's range changes. */
+export type RangeGrip = "rx0" | "rx1" | "cy";
+
+/** What a drag moves: the whole item, one end of a line (or corner of a rectangle), or a side of a range. */
+export type Grip = "item" | "start" | "end" | RangeGrip;
 export interface Hit { item: MapItem; grip: Grip }
 
 /** A picture and where its origin is. */
@@ -58,6 +61,7 @@ const COLOURS: Record<MapItemKind, string> = {
     obj: "#71717a",
 };
 const SELECTED = "#f59e0b";
+const RANGE = "#22c55e";
 
 export function numberOf(item: MapItem, name: string) {
     return Number(item.values[name] ?? 0) || 0;
@@ -161,6 +165,21 @@ function boxOf(item: MapItem, scene: Pictures): Box {
     const width = image.naturalWidth;
     const left = isFlipped(item) ? width - sprite.originX : sprite.originX;
     return { x: x - left, y: y - sprite.originY, width, height: image.naturalHeight };
+}
+
+/** Where a mob or NPC can move: from rx0 to rx1, standing at cy and as tall as it is. Null without all three. */
+function rangeOf(item: MapItem, scene: Pictures): Box | null {
+    const hasRange = ["rx0", "rx1", "cy"].every((name) => item.values[name] !== undefined);
+    if (item.kind !== "life" || !hasRange) return null;
+    const bottom = numberOf(item, "cy");
+    const top = Math.min(boxOf(item, scene).y, bottom - MARKER);
+    return boxBetween({ x: numberOf(item, "rx0"), y: top }, { x: numberOf(item, "rx1"), y: bottom });
+}
+
+/** A range is only shown, and changed, when its mob or NPC is the only thing selected. */
+function shownRange(item: MapItem, scene: Scene): Box | null {
+    if (scene.selected.size !== 1 || !scene.selected.has(item.path)) return null;
+    return rangeOf(item, scene);
 }
 
 /** Everything an item takes up in the map. */
@@ -288,6 +307,19 @@ function drawEnds(context: CanvasRenderingContext2D, ends: Point[], size: number
     for (const point of ends) context.fillRect(point.x - size, point.y - size, size * 2, size * 2);
 }
 
+function drawRange(context: CanvasRenderingContext2D, range: Box, pixel: number) {
+    outline(context, range, RANGE, pixel, true);
+    context.fillStyle = RANGE;
+    const right = range.x + range.width;
+    const handles = [
+        { x: range.x, y: range.y },
+        { x: right, y: range.y },
+        { x: range.x, y: range.y + range.height },
+        { x: right, y: range.y + range.height },
+    ];
+    drawEnds(context, handles, 4 * pixel);
+}
+
 function drawPath(context: CanvasRenderingContext2D, points: Point[]) {
     context.beginPath();
     for (const point of points) context.lineTo(point.x, point.y);
@@ -386,6 +418,10 @@ export function drawScene(context: CanvasRenderingContext2D, width: number, heig
         context.globalAlpha = 1;
     }
     if (scene.grid) drawGrid(context, scene.grid, view, pixel);
+    for (const item of scene.ordered) {
+        const range = scene.isShown(item) ? shownRange(scene.moved.get(item.path) ?? item, scene) : null;
+        if (range) drawRange(context, range, pixel);
+    }
     if (scene.ghost) {
         if (scene.ghost.sprite && pictureOf(scene.ghost.sprite) === undefined) missing.add(scene.ghost.sprite);
         context.globalAlpha = 0.6;
@@ -427,7 +463,37 @@ function distanceToEdges(point: Point, box: Box) {
     return Math.min(...sides);
 }
 
+/**
+ * The side of a range at a point. Over the mob or NPC itself only the top corners count, so it can still be
+ * dragged when its range is narrow.
+ */
+function rangeGripAt(item: MapItem, scene: Scene, point: Point): RangeGrip | null {
+    const range = shownRange(item, scene);
+    if (!range) return null;
+    const reach = REACH / scene.camera.zoom;
+    const right = range.x + range.width;
+    const bottom = range.y + range.height;
+    const topLeft = { x: range.x, y: range.y };
+    const topRight = { x: right, y: range.y };
+    const bottomLeft = { x: range.x, y: bottom };
+    const bottomRight = { x: right, y: bottom };
+    const isOverItem = contains(boxOf(item, scene), point);
+
+    function isOnSide(top: Point, end: Point) {
+        if (isOverItem) return distance(point, top) <= reach;
+        return distanceToLine(point, top, end) <= reach;
+    }
+
+    const isNearerLeft = point.x < range.x + range.width / 2;
+    if (isNearerLeft && isOnSide(topLeft, bottomLeft)) return "rx0";
+    if (!isNearerLeft && isOnSide(topRight, bottomRight)) return "rx1";
+    if (!isOverItem && distanceToLine(point, bottomLeft, bottomRight) <= reach) return "cy";
+    return null;
+}
+
 function gripAt(item: MapItem, scene: Scene, point: Point): Grip | null {
+    const rangeGrip = rangeGripAt(item, scene, point);
+    if (rangeGrip) return rangeGrip;
     const ends = endsOf(item);
     if (!ends) {
         const box = item.kind === "back" ? backBox(item, scene) : boxOf(item, scene);
