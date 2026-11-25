@@ -1,8 +1,5 @@
 @echo off
-rem Builds both programs and copies them into dist:
-rem   API -> dist\WzBrowser.exe (Release, single self-contained exe)
-rem   Web -> dist\wwwroot (static site)
-rem Files put in dist by hand, such as wwwroot\config.json, are left alone.
+rem Builds the API into dist\WzBrowser.exe (Release, single self-contained exe).
 setlocal
 cd /d "%~dp0"
 
@@ -24,25 +21,8 @@ copy /y WzBrowser.Api\bin\publish\WzBrowser.exe dist\ >nul
 if errorlevel 1 ( echo Could not replace dist\WzBrowser.exe. Close it if it's running and build again. & goto :failed )
 
 echo.
-echo === Web ===
-pushd WzBrowser.Web
-if not exist node_modules (
-    call npm ci
-    if errorlevel 1 ( popd & goto :failed )
-)
-call npm run build
-if errorlevel 1 ( popd & goto :failed )
-popd
-rem Robocopy exits below 8 on success. assets is mirrored so old hashed bundles don't pile up.
-robocopy WzBrowser.Web\build\client dist\wwwroot /e /xd assets /njh /njs /nfl /ndl >nul
-if errorlevel 8 goto :failed
-robocopy WzBrowser.Web\build\client\assets dist\wwwroot\assets /mir /njh /njs /nfl /ndl >nul
-if errorlevel 8 goto :failed
-
-echo.
 echo Done.
 echo   API: %~dp0dist\WzBrowser.exe
-echo   Web: %~dp0dist\wwwroot
 exit /b 0
 
 :failed

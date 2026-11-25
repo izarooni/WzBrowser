@@ -13,7 +13,8 @@ It comes in two parts:
 
 ```powershell
 git -c core.longpaths=true clone --recurse-submodules https://github.com/izarooni/WzBrowser.git
-build.bat                  # builds the API and web app into dist\
+build-api.bat              # builds the API into dist\WzBrowser.exe
+build-web.bat              # builds the web app into dist\wwwroot
 dist\WzBrowser.exe         # starts the API on http://127.0.0.1:5178
 npm run dev                # in WzBrowser.Web: serves the web app on http://localhost:5173
 ```
