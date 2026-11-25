@@ -49,6 +49,82 @@
     .btn-icon {
         @apply rounded-lg p-1.5 text-zinc-500 transition hover:bg-zinc-200/70 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-700/70 dark:hover:text-zinc-100;
     }
+    /* Square icon button, e.g. in a toolbar; aria-pressed="true" tints it. Its colours and corners are variables so that
+       what's attached to it (.label-reveal) matches, and opaque so that may cover its neighbours. */
+    .icon-button {
+        --panel: var(--color-white);
+        --face: var(--panel);
+        --edge: var(--panel);
+        --round: var(--radius-md);
+        @apply relative grid size-7 shrink-0 place-items-center border text-zinc-500 transition duration-150 active:scale-95 disabled:pointer-events-none disabled:opacity-40;
+        border-radius: var(--round);
+        border-color: var(--edge);
+        background-color: var(--face);
+    }
+    .icon-button:where(.dark, .dark *) { --panel: var(--color-zinc-900); }
+    /* Larger, with an edge of its own: for the workspace rather than a toolbar. */
+    .icon-button-lg { --edge: var(--color-zinc-200); --round: var(--radius-xl); @apply size-10 shadow-sm; }
+    .icon-button-lg:where(.dark, .dark *) { --edge: var(--color-zinc-800); }
+    .icon-button:hover { --face: var(--color-zinc-200); --edge: var(--color-zinc-200); @apply text-zinc-800 dark:text-zinc-200; }
+    .icon-button:active { --face: var(--color-zinc-300); --edge: var(--color-zinc-300); }
+    .icon-button:where(.dark, .dark *):hover { --face: var(--color-zinc-800); --edge: var(--color-zinc-800); }
+    .icon-button:where(.dark, .dark *):active { --face: var(--color-zinc-700); --edge: var(--color-zinc-700); }
+    .icon-button[aria-pressed="true"] {
+        --face: color-mix(in oklab, var(--color-accent-500) 15%, var(--panel));
+        --edge: color-mix(in oklab, var(--color-accent-500) 45%, var(--panel));
+        @apply text-accent-700 dark:text-accent-200;
+    }
+    .icon-button[aria-pressed="true"]:hover {
+        --face: color-mix(in oklab, var(--color-accent-500) 30%, var(--panel));
+        --edge: color-mix(in oklab, var(--color-accent-500) 75%, var(--panel));
+    }
+    .icon-button[aria-pressed="true"]:active { --face: color-mix(in oklab, var(--color-accent-500) 45%, var(--panel)); }
+
+    /* Slides data-label out of a button's right side, or its left with data-side="left", as more of the same button while
+       it's hovered or focused. For any positioned, bordered element that sets --face, --edge and --round.
+       It opens with an animation and closes with a transition, so changing sides while closed doesn't show. */
+    .label-reveal {
+        --slide: 200ms;
+        z-index: 0;
+        /* The corners on the label's side stay square, and the label on top, until it has closed. */
+        transition: color 150ms, background-color 150ms, border-color 150ms, scale 150ms, opacity 150ms,
+            border-radius 0s var(--slide), z-index var(--slide);
+    }
+    .label-reveal::after {
+        content: attr(data-label);
+        @apply pointer-events-none invisible absolute -inset-y-px left-full flex items-center border border-l-0 pr-2.5 pl-1 text-xs font-medium whitespace-nowrap;
+        border-radius: 0 var(--round) var(--round) 0;
+        border-color: var(--edge);
+        background-color: var(--face);
+        clip-path: inset(0 100% 0 0);
+        transition: clip-path var(--slide) ease-out, visibility var(--slide), background-color 150ms, border-color 150ms;
+    }
+    .label-reveal[data-side="left"]::after {
+        @apply right-full left-auto border-r-0 border-l pr-1 pl-2.5;
+        border-radius: var(--round) 0 0 var(--round);
+        clip-path: inset(0 0 0 100%);
+    }
+    .label-reveal:is(:hover, :focus-visible) {
+        z-index: 30;
+        border-radius: var(--round) 0 0 var(--round);
+        border-right-color: transparent;
+        transition: color 150ms, background-color 150ms, border-color 150ms, scale 150ms;
+    }
+    .label-reveal[data-side="left"]:is(:hover, :focus-visible) {
+        border-radius: 0 var(--round) var(--round) 0;
+        border-color: var(--edge);
+        border-left-color: transparent;
+    }
+    .label-reveal:is(:hover, :focus-visible)::after {
+        visibility: visible;
+        clip-path: inset(0);
+        transition: background-color 150ms, border-color 150ms;
+        animation: label-right var(--slide) ease-out;
+    }
+    .label-reveal[data-side="left"]:is(:hover, :focus-visible)::after { animation-name: label-left; }
+    .icon-button-lg.label-reveal::after { @apply pr-4 text-sm; }
+    .icon-button-lg.label-reveal[data-side="left"]::after { @apply pr-1 pl-4; }
+
     /* The X in a dialog's corner. */
     .btn-close {
         @apply rounded-lg p-2 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800;
@@ -110,6 +186,8 @@
     background-image: radial-gradient(circle, rgb(82 82 91 / 0.6) 1.2px, transparent 1.2px);
 }
 
+@keyframes label-right { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
+@keyframes label-left { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
 @keyframes shimmer { 100% { transform: translateX(100%); } }
 .skeleton { position: relative; overflow: hidden; }
 .skeleton::after {
@@ -121,4 +199,5 @@
 
 @media (prefers-reduced-motion: reduce) {
     .skeleton::after { animation: none; }
+    .label-reveal, .label-reveal::after { animation: none !important; transition: none !important; }
 }

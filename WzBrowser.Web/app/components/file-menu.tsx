@@ -13,7 +13,7 @@ const PANEL = "rounded-xl border border-zinc-200 bg-white p-1 text-[13px] shadow
 
 /**
  * The header's File menu: every open file, with buttons to save it to a new file or close it, which lets the server let
- * go of it. Clicking a file brings its window to the front.
+ * go of it and leaves the menu open for closing more. Clicking a file opens its window, or brings it to the front if it has one.
  */
 export function FileMenu() {
     const { files } = useWorkspaceData();
@@ -27,11 +27,13 @@ export function FileMenu() {
         if (!open) return;
 
         function away(event: Event) {
+            // Answering whether to close a file with unsaved changes leaves the menu open too.
+            if (event.target instanceof Element && event.target.closest("#headlessui-portal-root")) return;
             if (!ref.current?.contains(event.target as Node)) setOpen(false);
         }
 
         function escape(event: KeyboardEvent) {
-            if (event.key === "Escape") setOpen(false);
+            if (event.key === "Escape" && !document.querySelector("#headlessui-portal-root [role=dialog]")) setOpen(false);
         }
 
         addEventListener("pointerdown", away, true);
@@ -47,6 +49,12 @@ export function FileMenu() {
     function run(action: () => void) {
         setOpen(false);
         action();
+    }
+
+    function show(file: OpenedFile) {
+        // A file the server already had open before a reload has no window until it's opened here.
+        actions.openFile(file);
+        actions.showWindow(file.id);
     }
 
     return (
@@ -82,9 +90,9 @@ export function FileMenu() {
                                 key={file.id}
                                 file={file}
                                 readOnly={readOnly}
-                                onShow={() => run(() => actions.showWindow(file.id))}
+                                onShow={() => run(() => show(file))}
                                 onSave={() => run(() => void actions.save(file.id))}
-                                onClose={() => run(() => void actions.closeWindow(file.id))}
+                                onClose={() => void actions.closeWindow(file.id)}
                             />
                         ))}
                     </ul>
@@ -114,7 +122,7 @@ function FileRow({ file, readOnly, onShow, onSave, onClose }: {
                 role="menuitem"
                 title={`${file.path}
 
-Click to bring its window to the front`}
+Click to open its window or bring it to the front`}
                 onClick={onShow}
                 className={`${ITEM} min-w-0 flex-1 text-zinc-700 dark:text-zinc-200`}
             >

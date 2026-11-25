@@ -9,6 +9,9 @@ export const parentPath = (path: string) => {
 
 export const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
+/** The folder a file on disk is in, with either kind of slash; empty for a bare file name. */
+export const folderPath = (path: string) => path.slice(0, Math.max(0, path.search(/[\\/][^\\/]*$/)));
+
 /** What a node is, as far as pasting is concerned. The file root behaves like a directory. */
 export type PasteKind = Pick<WzNode, "type">;
 

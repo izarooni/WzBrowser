@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState, type CSSProperties, type PointerEven
 import { useConnection } from "../lib/connection";
 import type { OpenedFile } from "../lib/api";
 import { LibraryScopeProvider, tableTopOf, type TableTop } from "../lib/library-api";
+import { folderPath } from "../lib/paths";
 import { MIN_H, MIN_W, useActions, useWorkspaceData, type Win } from "../lib/workspace";
 import { Archive, Download, Maximize, Minus, Plus, Restore, Undo, XMark } from "./icons";
 import { CanvasGallery } from "./canvas-gallery";
@@ -167,6 +168,8 @@ export const WzWindow = memo(function WzWindow({ win, focused, pan }: {
         />
     );
 
+    const folder = file && folderPath(file.path);
+
     return (
         <section
             aria-label={file?.name ?? "WZ file"}
@@ -199,6 +202,12 @@ export const WzWindow = memo(function WzWindow({ win, focused, pan }: {
                 <div className="flex min-w-0 flex-1 items-baseline gap-3">
                     <h2 className="truncate text-sm font-semibold" title={file?.path}>{file?.name ?? "…"}</h2>
                     {file && <span className="hidden shrink-0 text-xs text-zinc-500 sm:inline">{file.encryption} · v{file.version}</span>}
+                    {/* Right to left, so a path that doesn't fit loses its start and keeps the folder that tells installs apart. */}
+                    {folder && (
+                        <span title={file?.path} dir="rtl" className="min-w-0 shrink-[99999] truncate text-left font-mono text-[11px] text-zinc-500">
+                            <bdi dir="ltr">{folder}</bdi>
+                        </span>
+                    )}
                     {file?.dirty && (
                         <span
                             title="Edits are in memory only. Save writes a new file; the original is never changed."

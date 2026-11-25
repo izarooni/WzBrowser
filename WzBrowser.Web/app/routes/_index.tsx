@@ -1,6 +1,8 @@
 import type { MetaFunction } from "@remix-run/react";
-import { useRef, type PointerEvent, type WheelEvent } from "react";
-import { Squares } from "../components/icons";
+import { useRef, useState, type PointerEvent, type WheelEvent } from "react";
+import { IconButton } from "../components/icon-button";
+import { QuestionMark, Squares } from "../components/icons";
+import { ShortcutsDialog } from "../components/shortcuts-dialog";
 import { WzWindow } from "../components/wz-window";
 import { useConnection } from "../lib/connection";
 import { useActions, useLayout, type Win } from "../lib/workspace";
@@ -12,6 +14,7 @@ export default function Workspace() {
     const { status, recheck } = useConnection();
     const { wins, pan } = useLayout();
     const actions = useActions();
+    const [showShortcuts, setShowShortcuts] = useState(false);
     const panning = useRef<{ sx: number; sy: number; x: number; y: number } | null>(null);
 
     const focusedId = wins.reduce<{ id: string; z: number } | null>((best, w) => (!best || w.z > best.z ? { id: w.fileId, z: w.z } : best), null)?.id;
@@ -101,19 +104,24 @@ export default function Workspace() {
                 </div>
             )}
 
-            <div className={`pointer-events-none absolute bottom-6 left-6 items-center gap-3 ${coversCanvas ? "hidden" : "flex"}`}>
-                <button
-                    type="button"
+            <div className={`pointer-events-none absolute bottom-6 left-6 items-center gap-2 ${coversCanvas ? "hidden" : "flex"}`}>
+                <IconButton
+                    label="Tidy windows"
+                    icon={Squares}
+                    size="lg"
                     onClick={actions.tidy}
                     disabled={wins.length === 0}
-                    className="pointer-events-auto flex items-center gap-2.5 rounded-xl border border-zinc-200 bg-white/90 px-4 py-2.5 text-sm font-medium text-zinc-700 shadow-sm backdrop-blur transition hover:bg-white disabled:opacity-40 dark:border-zinc-800 dark:bg-zinc-900/90 dark:text-zinc-200 dark:hover:bg-zinc-900"
-                >
-                    <Squares className="size-4" />Tidy windows
-                </button>
-                <p className="hidden rounded-xl border border-zinc-200 bg-white/90 px-4 py-2.5 text-xs text-zinc-500 shadow-sm backdrop-blur md:block dark:border-zinc-800 dark:bg-zinc-900/90">
-                    Drag to copy · <kbd className="font-mono">Shift</kbd> to move · <kbd className="font-mono">Ctrl+C/X/V</kbd> · <kbd className="font-mono">Ctrl+S</kbd> save · <kbd className="font-mono">Del</kbd> delete
-                </p>
+                    className="pointer-events-auto disabled:pointer-events-none"
+                />
+                <IconButton
+                    label="Shortcuts"
+                    icon={QuestionMark}
+                    size="lg"
+                    onClick={() => setShowShortcuts(true)}
+                    className="pointer-events-auto"
+                />
             </div>
+            <ShortcutsDialog open={showShortcuts} onClose={() => setShowShortcuts(false)} />
         </div>
     );
 }

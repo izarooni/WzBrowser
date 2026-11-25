@@ -51,6 +51,28 @@ import {
 import { useStored } from "../lib/stored";
 import { useActions } from "../lib/workspace";
 import { ContextMenu, type MenuItem } from "./context-menu";
+import { IconButton, type IconType } from "./icon-button";
+import {
+    Bolt,
+    Bricks,
+    Chair,
+    Cloud,
+    CloudPointer,
+    Creature,
+    DashedBox,
+    Ellipsis,
+    FoldedMap,
+    GridLines,
+    GridMagnet,
+    GridSteps,
+    Ladder,
+    Magnet,
+    Parallax,
+    Portal,
+    Steps,
+    Tree,
+    ViewRange,
+} from "./icons";
 import { MapPalette, type Tool } from "./map-palette";
 import { InspectPanel, ItemList, MapPanel, MinimapOverlay, ProblemList } from "./map-panels";
 import { PaneResizer, usePaneWidth } from "./pane-resizer";
@@ -71,6 +93,21 @@ const ARROW_PAN = 48;
 const MINIMAP_SCALE = 16;
 /** The largest picture that's exported, in pixels each way; larger maps are scaled down. */
 const MAX_EXPORT = 8192;
+
+const KIND_ICONS: Record<MapItemKind, IconType> = {
+    back: Cloud,
+    tile: Bricks,
+    obj: Tree,
+    reactor: Bolt,
+    life: Creature,
+    portal: Portal,
+    foothold: Steps,
+    ladder: Ladder,
+    seat: Chair,
+    area: DashedBox,
+    misc: Ellipsis,
+    bounds: ViewRange,
+};
 
 type Tab = "inspect" | "place" | "list" | "map" | "check";
 const TABS: { tab: Tab; label: string }[] = [
@@ -982,49 +1019,54 @@ export function MapCanvas({ fileId, path, mapIds, revision, onOpenRaw, onOpenMap
     const disabled = readOnly || busy;
     const link = layout?.info.link;
     const barSelect = "rounded-md border border-zinc-300 bg-white px-2 py-1 dark:border-zinc-700 dark:bg-zinc-950";
-    const toggles: { label: string; title: string; on: boolean; set: (on: boolean) => void }[] = [
+    const toggles: { label: string; icon: IconType; title: string; on: boolean; set: (on: boolean) => void }[] = [
         {
             label: "Snap",
+            icon: Magnet,
             title: "Fits dragged and placed things to the ones around them; hold Alt to drag freely",
             on: snapThings,
             set: setSnapThings,
         },
-        { label: "Grid", title: "Shows a grid to align things with", on: showGrid, set: setShowGrid },
+        { label: "Grid", icon: GridLines, title: "Shows a grid to align things with", on: showGrid, set: setShowGrid },
         {
             label: "Snap to grid",
+            icon: GridMagnet,
             title: "Aligns dragged and placed tiles, objects and other things to the grid",
             on: snapGrid,
             set: setSnapGrid,
         },
         {
             label: "Footholds to grid",
+            icon: GridSteps,
             title: "Aligns drawn and dragged footholds to the grid",
             on: snapFootholds,
             set: setSnapFootholds,
         },
-        { label: "Parallax", title: "Backgrounds move with the view, as in the game", on: parallax, set: setParallax },
+        {
+            label: "Parallax",
+            icon: Parallax,
+            title: "Backgrounds move with the view, as in the game",
+            on: parallax,
+            set: setParallax,
+        },
         {
             label: "Pick backgrounds",
+            icon: CloudPointer,
             title: "Lets clicks select backgrounds",
             on: pickBackgrounds,
             set: setPickBackgrounds,
         },
-        { label: "Minimap", title: "Shows the minimap", on: showMinimap, set: setShowMinimap },
+        { label: "Minimap", icon: FoldedMap, title: "Shows the minimap", on: showMinimap, set: setShowMinimap },
     ];
 
-    function checkbox(label: string, checked: boolean, onChange: () => void, title?: string) {
-        return (
-            <label key={label} title={title} className="flex cursor-pointer select-none items-center gap-1.5">
-                <input type="checkbox" checked={checked} onChange={onChange} className="accent-accent-600" />
-                {label}
-            </label>
-        );
+    function iconToggle(label: string, icon: IconType, on: boolean, onToggle: () => void, title?: string) {
+        return <IconButton key={label} label={label} icon={icon} aria-pressed={on} title={title} onClick={onToggle} />;
     }
 
     return (
         <>
             <div className="flex min-w-0 flex-1 flex-col">
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-zinc-100 px-3 py-2 text-xs dark:border-zinc-800">
+                <div data-label-bounds className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-zinc-100 px-3 py-1.5 text-xs dark:border-zinc-800">
                     <select
                         aria-label="Layer"
                         value={layer}
@@ -1044,9 +1086,15 @@ export function MapCanvas({ fileId, path, mapIds, revision, onOpenRaw, onOpenMap
                             className={`w-14 ${barSelect}`}
                         />
                     </label>
-                    {MAP_KINDS.map(({ kind, label }) => checkbox(label, !hidden.has(kind), () => toggleKind(kind)))}
-                    <span aria-hidden className="h-4 w-px bg-zinc-200 dark:bg-zinc-700" />
-                    {toggles.map(({ label, title, on, set }) => checkbox(label, on, () => set(!on), title))}
+                    <div role="group" aria-label="Show" className="flex flex-wrap gap-0.5">
+                        {MAP_KINDS.map(({ kind, label }) =>
+                            iconToggle(label, KIND_ICONS[kind], !hidden.has(kind), () => toggleKind(kind)))}
+                    </div>
+                    <hr aria-hidden className="basis-full border-zinc-200 dark:border-zinc-800" />
+                    <div role="group" aria-label="Options" className="flex flex-wrap gap-0.5">
+                        {toggles.map(({ label, icon, title, on, set }) =>
+                            iconToggle(label, icon, on, () => set(!on), title))}
+                    </div>
                     {(showGrid || snapGrid || snapFootholds) && (
                         <select
                             aria-label="Grid size"
