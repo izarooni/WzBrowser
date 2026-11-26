@@ -15,6 +15,7 @@ import {
     footholdBelow,
     FreeNames,
     isCopyable,
+    isRangeGrip,
     movedItems,
     moveToLayer,
     platformOf,
@@ -23,6 +24,7 @@ import {
     setEach,
     snapOffset,
     snapPoint,
+    snapRangeOffset,
     standing,
     tileSetClash,
     type Snapping,
@@ -756,6 +758,10 @@ export function MapCanvas({ fileId, path, mapIds, revision, onOpenRaw, onOpenMap
         // Alt puts things exactly where they're dragged.
         if (event.altKey || !layout) return moving;
         const [first] = from.items;
+        if (isRangeGrip(from.grip)) {
+            const snapped = snapRangeOffset(first, from.grip, moving.dx, moving.dy, snapping);
+            return { ...moving, dx: snapped.x, dy: snapped.y };
+        }
         if (from.grip !== "item") {
             if (first.kind !== "foothold") return moving;
             const end = endsOf(first)![from.grip === "start" ? 0 : 1];

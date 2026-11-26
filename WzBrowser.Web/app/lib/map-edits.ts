@@ -98,7 +98,7 @@ function withMoved(item: MapItem, dx: number, dy: number): MapItem {
     return { ...item, values };
 }
 
-function isRangeGrip(grip: Grip): grip is RangeGrip {
+export function isRangeGrip(grip: Grip): grip is RangeGrip {
     return grip === "rx0" || grip === "rx1" || grip === "cy";
 }
 
@@ -288,6 +288,18 @@ export function snapPoint(
         if (offset) return { x: point.x + offset.x, y: point.y + offset.y };
     }
     return snapping.footholdGrid ? toGrid(snapping.footholdGrid, point) : point;
+}
+
+/** How far to drag a side of a mob's or NPC's range, dragged `dx` and `dy`, for it to land on the grid. */
+export function snapRangeOffset(item: MapItem, grip: RangeGrip, dx: number, dy: number, snapping: Snapping): Point {
+    const moving = { x: dx, y: dy };
+    if (!snapping.grid) return moving;
+    if (grip === "cy") {
+        const y = numberOf(item, "cy") + dy;
+        return { x: dx, y: toGrid(snapping.grid, { x: 0, y }).y - numberOf(item, "cy") };
+    }
+    const x = numberOf(item, grip) + dx;
+    return { x: toGrid(snapping.grid, { x, y: 0 }).x - numberOf(item, grip), y: dy };
 }
 
 // ------------------------------------------------------------ deleting, copying, ordering
