@@ -53,6 +53,18 @@ function mainLabelOf(kind: OpenedFile["kind"] | undefined) {
     }
 }
 
+/** The picked tab, or before one is picked (or once it's gone), the raw tree if offered, else the first view. */
+function currentViewOf(tab: View | null, views: View[]) {
+    if (tab && views.includes(tab)) return tab;
+    if (views.includes("raw")) return "raw";
+    return views[0];
+}
+
+function addView(views: ReadonlySet<View>, view: View) {
+    if (views.has(view)) return views;
+    return new Set(views).add(view);
+}
+
 /**
  * A file's own view: the quest browser, the _Canvas gallery, the Character/Item/Skill thumbnails, the map editor, or
  * Commodity.
@@ -96,8 +108,8 @@ export const WzWindow = memo(function WzWindow({ win, focused, pan }: {
     // Sized by CSS, so it follows the page as that's resized.
     if (pan) place = { left: -pan.x, top: -pan.y, width: "100%", height: "100%" };
     else place = { left: win.x, top: win.y, width: win.w, height: win.collapsed ? undefined : win.h };
-    // Quest archives open on the quest browser, Etc.wz on the Commodity table, and _Canvas and Character files on their
-    // thumbnails; the raw tree is one tab away.
+    // Quest archives get the quest browser, Etc.wz the Commodity table, and _Canvas and Character files their
+    // thumbnails, each a tab next to the raw tree.
     const mainLabel = mainLabelOf(file?.kind);
     // Mob, Etc and Npc files (or their modular parts) also get the library's table for that data,
     // browse-only or not.
@@ -111,14 +123,17 @@ export const WzWindow = memo(function WzWindow({ win, focused, pan }: {
     if (mainLabel) views.push("main");
     if (dataView) views.push("data");
     if (!browseOnly) views.push("raw");
-    // Null until a tab is picked: the first view is shown, even once the file (and with it the views) has loaded.
+    // Null until a tab is picked: the raw tree is shown (the first view for browse-only viewers), even once the file
+    // (and with it the views) has loaded.
     const [tab, setTab] = useState<View | null>(null);
-    const current = tab && views.includes(tab) ? tab : views[0];
-    // The data table loads the whole library's data, so it's only mounted once shown, then kept to hold its state.
-    const [dataShown, setDataShown] = useState(false);
-    useEffect(function keepDataMounted() {
-        if (current === "data") setDataShown(true);
+    const current = currentViewOf(tab, views);
+    // The main and data views read other files (the NPC table reads Quest.wz, the map editor Npc.wz, ...), so each is
+    // only mounted once shown, then kept to hold its state.
+    const [shown, setShown] = useState<ReadonlySet<View>>(() => new Set());
+    useEffect(function keepShownMounted() {
+        if (current) setShown((previous) => addView(previous, current));
     }, [current]);
+    const isMounted = (view: View) => current === view || shown.has(view);
 
     function showInRawTree(path: string) {
         setTab("raw");
@@ -262,14 +277,14 @@ export const WzWindow = memo(function WzWindow({ win, focused, pan }: {
                     ))}
                 </div>
             )}
-            {/* The views stay mounted (the inactive ones are hidden) so the raw tree keeps its state and can be
-                revealed from the main view. */}
-            {!win.collapsed && file && mainLabel && (
+            {/* Once shown, the views stay mounted (the inactive ones are hidden) so they keep their state and the raw
+                tree can be revealed from the main view. */}
+            {!win.collapsed && file && mainLabel && isMounted("main") && (
                 <div className={current === "main" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
                     <MainView file={file} onOpenRaw={openRaw} />
                 </div>
             )}
-            {!win.collapsed && dataView && (dataShown || current === "data") && (
+            {!win.collapsed && dataView && isMounted("data") && (
                 <div className={current === "data" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
                     <LibraryScopeProvider fileId={win.fileId}>{dataView.view()}</LibraryScopeProvider>
                 </div>
