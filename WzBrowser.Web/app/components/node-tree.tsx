@@ -384,6 +384,12 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
         catch (e) { ws.toast("error", `Couldn't export the images in “${name}”: ${errorMessage(e)}`); }
     };
 
+    const exportXml = async (path: string) => {
+        const name = baseName(path);
+        try { await download(api.xmlUrl(fileId, path), `${name.replace(/[\\/:*?"<>|]/g, "_")}.xml`); }
+        catch (e) { ws.toast("error", `Couldn't export “${name}” to XML: ${errorMessage(e)}`); }
+    };
+
     const importZip = (path: string) => {
         importTarget.current = path;
         importInput.current?.click();
@@ -418,6 +424,7 @@ export const NodeTree = memo(function NodeTree({ fileId }: { fileId: string }) {
         const saves: MenuItem[] = [];
         if (node.type === "canvas") saves.push({ label: "Save PNG", icon: <Download className="size-4" />, onSelect: () => void saveCanvas(path) });
         if (node.hasChildren && node.type !== "canvas") saves.push({ label: "Export all images", icon: <Photo className="size-4" />, onSelect: () => void exportImages(path) });
+        if (node.type === "image") saves.push({ label: "Export to XML", icon: <Document className="size-4" />, onSelect: () => void exportXml(path) });
         if (!readOnly && IMPORT_TARGETS.has(node.type))
             saves.push({ label: "Import zip…", icon: <Upload className="size-4" />, onSelect: () => importZip(path) });
         if (saves.length) items.push(...(items.length ? [{ kind: "separator" } as const] : []), ...saves);

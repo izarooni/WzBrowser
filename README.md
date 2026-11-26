@@ -105,6 +105,8 @@ Drag a node from one window onto a folder or image in another to copy it (hold *
 
 Right-click a node and choose **Export all images** to save every canvas under it as PNGs in one go, in a zip laid out like the tree. Each folder also gets a small `.props` file with everything else in it (delay, origin, the pixel format, other values, real names), so the zip can go back in: right-click a node and choose **Import zip…**. Folders become .imgs and sub-properties of the same name, created if missing; PNGs become canvases. A zip you make by hand works too: without a `.props`, folders become sub-properties and new pictures are stored lossless.
 
+Right-click an .img and choose **Export to XML** to save it as server XML (`0100100.img.xml`), the same as **Convert to XML…** writes it: canvases keep their size and children but not their pixels, and unsaved edits are included.
+
 ## Using it from Claude (MCP)
 
 The API also serves an [MCP](https://modelcontextprotocol.io) server at `/mcp`, so Claude can read and edit files in bulk. Claude works on the same open files as the web app, so its edits show up there as unsaved changes.

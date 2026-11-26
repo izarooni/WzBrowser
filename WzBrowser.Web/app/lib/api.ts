@@ -663,6 +663,8 @@ export function createApi(base: string) {
             `${base}/api/files/${id}/png?path=${q(path)}${revision != null ? `&v=${revision}` : ""}`,
         /** Every canvas under a node (folder, .img or property; the whole file for ""), as PNGs in a zip laid out like the tree. */
         pngsUrl: (id: string, path: string) => `${base}/api/files/${id}/pngs?path=${q(path)}`,
+        /** An .img as server XML, canvases without their pixels; unsaved edits included. */
+        xmlUrl: (id: string, path: string) => `${base}/api/files/${id}/xml?path=${q(path)}`,
         /**
          * Replaces a canvas' picture with this image file (PNG, JPEG, BMP or GIF), stored as `quality` (an IMAGE_QUALITIES
          * value; lossless when left out). Removes any _inlink/_outlink.

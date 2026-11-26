@@ -329,6 +329,12 @@ api.MapGet("/files/{id}/pngs", (string id, string? path, WzService wz) =>
     var (zip, name) = wz.ExportPngs(id, path);
     return Results.File(zip, "application/zip", name);
 });
+// One .img as server XML, as the XML conversion writes it (canvases without their pixels).
+api.MapGet("/files/{id}/xml", (string id, string path, WzService wz) =>
+{
+    var (xml, name) = wz.ExportImageXml(id, path);
+    return Results.File(xml, "application/xml", name);
+});
 // The reverse: a zip of folders and PNGs (an export, or one made by hand) put into a node; the body is the zip itself.
 // Folders become directories, .imgs and sub-properties (created when missing), PNGs canvases, and each folder's .props
 // restores what the export recorded. `quality` as for PUT png below; by default each picture keeps its exported format.

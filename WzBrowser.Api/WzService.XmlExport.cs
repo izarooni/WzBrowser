@@ -157,6 +157,41 @@ public sealed partial class WzService
         }
     }
 
+    /// <summary>
+    /// One .img as server XML, the same as <see cref="StartXmlExport"/> writes it: canvases keep their size and children
+    /// but not their pixels. Unsaved edits are included. Built in a temp file deleted when the returned stream closes.
+    /// </summary>
+    /// <returns>The XML and its suggested file name ("0100100.img.xml").</returns>
+    public (Stream Xml, string FileName) ExportImageXml(string id, string path)
+    {
+        var entry = Get(id);
+        var temp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".xml");
+        string name;
+        var culture = CultureInfo.CurrentCulture;
+        // The serializer writes doubles with the current culture; servers parse them with a '.'.
+        CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
+        try
+        {
+            lock (entry.Lock)
+            {
+                if (Resolve(entry.File, path) is not WzImage image) throw new ArgumentException($"'{path}' isn't an .img.");
+                name = SafeFileName(image.Name) + ".xml";
+                new WzClassicXmlSerializer(2, LineBreak.Windows, false).SerializeImage(image, temp);
+            }
+        }
+        catch
+        {
+            File.Delete(temp);
+            throw;
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = culture;
+        }
+        var xml = new FileStream(temp, FileMode.Open, FileAccess.Read, FileShare.None, 1 << 16, FileOptions.DeleteOnClose);
+        return (xml, name);
+    }
+
     private static readonly char[] BadFileChars = [.. System.IO.Path.GetInvalidFileNameChars(), ':'];
     private static string SafeFileName(string name) =>
         name.IndexOfAny(BadFileChars) < 0 ? name : string.Concat(name.Select(c => BadFileChars.Contains(c) ? '_' : c));
