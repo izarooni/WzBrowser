@@ -290,7 +290,7 @@ public sealed partial class WzService(string? root = null)
         var id = FileId(path);
         if (_files.TryGetValue(id, out var existing))
         {
-            if (!hidden) existing.Hidden = false;
+            if (!hidden) ReopenListed(existing);
             return Describe(id, existing);
         }
 
@@ -308,6 +308,19 @@ public sealed partial class WzService(string? root = null)
         };
         _files[id] = entry;
         return Describe(id, entry);
+    }
+
+    /// <summary>
+    /// Opening a file that's already open lists it and drops its name lookups, so the String files beside it are read
+    /// again on the next lookup.
+    /// </summary>
+    private static void ReopenListed(Entry entry)
+    {
+        lock (entry.Lock)
+        {
+            entry.Hidden = false;
+            entry.Names = null;
+        }
     }
 
     /// <summary>Which view a file gets (see <see cref="OpenedFileDto.Kind"/>).</summary>
@@ -420,10 +433,50 @@ public sealed partial class WzService(string? root = null)
         {
             entry.Closed = true;
             ForgetHistory(entry);
-            entry.Names?.Dispose();
             entry.File.Dispose();
         }
         return true;
+    }
+
+    /// <summary>Closes a listed file for the user, then lets go of what was only held on its behalf.</summary>
+    public bool CloseAndRelease(string id)
+    {
+        if (!Close(id)) return false;
+        ReleaseUnlisted();
+        return true;
+    }
+
+    /// <summary>
+    /// Lets go of every file held without being listed: those opened hidden on behalf of another (String.wz, Npc.wz,
+    /// ...), the _Canvas parts that outlinks point into and the Mob files behind the mob table's sprites. Each is opened
+    /// again the next time it's needed. A hidden file with unsaved changes is kept. Returns how many files were let go of.
+    /// </summary>
+    public int ReleaseUnlisted()
+    {
+        var released = 0;
+        foreach (var (id, entry) in _files)
+            if (entry is { Hidden: true, Dirty: false, Edit: null } && Close(id)) released++;
+
+        foreach (var path in _canvasParts.Keys)
+        {
+            if (!_canvasParts.TryRemove(path, out var part) || part.File == null) continue;
+            lock (part.Lock) part.File.Dispose();
+            released++;
+        }
+
+        lock (_mobsLock)
+        {
+            var mobFiles = _mobImages?.Values.Select(mob => mob.Image.WzFileParent).OfType<WzFile>().Distinct().ToList() ?? [];
+            foreach (var file in mobFiles)
+            {
+                file.Dispose();
+                released++;
+            }
+            _mobImages = null;
+        }
+
+        foreach (var install in _installs.Values) released += install.ReleaseUnlisted();
+        return released;
     }
 
     public List<NodeDto> Children(string id, string? path)

@@ -18,7 +18,7 @@ const PANEL = "rounded-xl border border-zinc-200 bg-white p-1 text-[13px] shadow
 export function FileMenu() {
     const { files } = useWorkspaceData();
     const actions = useActions();
-    const { status, readOnly } = useConnection();
+    const { api, status, readOnly } = useConnection();
     const [open, setOpen] = useState(false);
     const ref = useRef<HTMLDivElement>(null);
     const list = Object.values(files).sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
@@ -49,6 +49,10 @@ export function FileMenu() {
     function run(action: () => void) {
         setOpen(false);
         action();
+    }
+
+    function releaseUnlisted() {
+        void api.releaseUnlisted().catch(() => {});
     }
 
     function show(file: OpenedFile) {
@@ -101,6 +105,15 @@ export function FileMenu() {
                             Open file…
                         </button>
                     )}
+                    <button
+                        type="button"
+                        role="menuitem"
+                        title="Lets go of the files the server is holding without listing them here (String.wz read for names, sprites' pictures, ...), so they can be replaced on disk. They're read again when next needed."
+                        className={`${ITEM} text-zinc-500 dark:text-zinc-400`}
+                        onClick={() => run(releaseUnlisted)}
+                    >
+                        Release unlisted files
+                    </button>
                 </div>
             )}
         </div>

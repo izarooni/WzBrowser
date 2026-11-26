@@ -6,20 +6,30 @@ namespace WzBrowser.Api;
 
 /// <summary>
 /// Resolves ids (NPC, mob, item, map, skill) to display names using the String.wz that sits next to a quest archive
-/// (or, in a modular install, the parts in Data/String). These are loaded as private, read-only handles that are never
-/// listed as open files, and each kind is built the first time it is asked for. Without them every lookup returns nothing.
+/// (or, in a modular install, the parts in Data/String). Each kind is built the first time it is asked for, from
+/// private, read-only handles that are let go of straight after, so String.wz isn't held once its window is closed.
+/// When the String files on disk change (replaced, added, removed), every kind is read again on its next lookup.
+/// Without them every lookup returns nothing.
 /// </summary>
-public sealed class NameIndex : IDisposable
+public sealed class NameIndex
 {
-    private readonly List<string> _stringWzPaths;
+    /// <summary>How long a check of the String files on disk holds before they're looked at again.</summary>
+    private static readonly TimeSpan RecheckAfter = TimeSpan.FromSeconds(2);
+
+    private readonly string _questWzPath;
+    private readonly Func<string, bool> _allowed;
     private readonly object _lock = new();
     private readonly Dictionary<string, Dictionary<int, string>> _kinds = new();
-    private List<WzFile>? _files;
+    private List<string> _stringWzPaths = [];
+    /// <summary>Each String file's path, write time and size when the kinds were read.</summary>
+    private string _stamp = "";
+    private DateTime _checkedAt = DateTime.MinValue;
 
     /// <param name="allowed">Which files may be read (a server pinned to a folder reads nothing outside it).</param>
     public NameIndex(string questWzPath, Func<string, bool> allowed)
     {
-        _stringWzPaths = (WzLayout.Find(questWzPath, "String", "")?.Files ?? []).Where(allowed).ToList();
+        _questWzPath = questWzPath;
+        _allowed = allowed;
     }
 
     public Dictionary<int, string> Resolve(string kind, IEnumerable<int> ids)
@@ -51,31 +61,66 @@ public sealed class NameIndex : IDisposable
 
     private Dictionary<int, string> Kind(string kind)
     {
+        ForgetWhenChanged();
         if (_kinds.TryGetValue(kind, out var cached)) return cached;
         var names = new Dictionary<int, string>();
         _kinds[kind] = names; // cache even when empty so a missing String.wz isn't re-probed on every request
 
-        foreach (var file in Open())
-            switch (kind)
-            {
-                case "npc": Collect(file, "Npc.img", names); break;
-                case "mob": Collect(file, "Mob.img", names); break;
-                case "skill": Collect(file, "Skill.img", names); break;
-                case "map": Collect(file, "Map.img", names, isMap: true); break;
-                case "item":
-                    // Equipment is grouped by category (Eqp.img/Eqp/Cap/...), so Collect recurses through non-numeric nodes.
-                    foreach (var img in new[] { "Eqp.img", "Consume.img", "Ins.img", "Etc.img", "Cash.img" })
-                        Collect(file, img, names);
-                    break;
-            }
+        var files = Open();
+        try
+        {
+            foreach (var file in files)
+                CollectKind(file, kind, names);
+        }
+        finally
+        {
+            foreach (var file in files) file.Dispose();
+        }
         return names;
+    }
+
+    /// <summary>Drops every kind read when the String files on disk have changed since, so they're read again.</summary>
+    private void ForgetWhenChanged()
+    {
+        var now = DateTime.UtcNow;
+        if (now - _checkedAt < RecheckAfter) return;
+        _checkedAt = now;
+
+        var paths = (WzLayout.Find(_questWzPath, "String", "")?.Files ?? []).Where(_allowed).ToList();
+        var stamp = string.Join("|", paths.Select(StampOf));
+        if (stamp == _stamp) return;
+        _stamp = stamp;
+        _stringWzPaths = paths;
+        _kinds.Clear();
+    }
+
+    private static string StampOf(string path)
+    {
+        var info = new FileInfo(path);
+        if (!info.Exists) return path;
+        return $"{path}:{info.LastWriteTimeUtc.Ticks}:{info.Length}";
+    }
+
+    private static void CollectKind(WzFile file, string kind, Dictionary<int, string> names)
+    {
+        switch (kind)
+        {
+            case "npc": Collect(file, "Npc.img", names); break;
+            case "mob": Collect(file, "Mob.img", names); break;
+            case "skill": Collect(file, "Skill.img", names); break;
+            case "map": Collect(file, "Map.img", names, isMap: true); break;
+            case "item":
+                // Equipment is grouped by category (Eqp.img/Eqp/Cap/...), so Collect recurses through non-numeric nodes.
+                foreach (var img in new[] { "Eqp.img", "Consume.img", "Ins.img", "Etc.img", "Cash.img" })
+                    Collect(file, img, names);
+                break;
+        }
     }
 
     /// <summary>The String files that could be read; a broken one is skipped rather than failing every lookup.</summary>
     private List<WzFile> Open()
     {
-        if (_files != null) return _files;
-        _files = [];
+        var files = new List<WzFile>();
         foreach (var path in _stringWzPaths)
         {
             try
@@ -84,7 +129,7 @@ public sealed class NameIndex : IDisposable
                 var file = new WzFile(path, gameVersion, version);
                 if (file.ParseWzFile() == WzFileParseStatus.Success)
                 {
-                    _files.Add(file);
+                    files.Add(file);
                     ReadLog.Record(path);
                 }
                 else file.Dispose();
@@ -94,7 +139,7 @@ public sealed class NameIndex : IDisposable
                 // unreadable part: names from it just stay unresolved
             }
         }
-        return _files;
+        return files;
     }
 
     private static void Collect(WzFile file, string imageName, Dictionary<int, string> into, bool isMap = false)
@@ -130,15 +175,5 @@ public sealed class NameIndex : IDisposable
         var name = (node["mapName"] as WzStringProperty)?.Value;
         if (string.IsNullOrEmpty(name)) return street;
         return string.IsNullOrEmpty(street) ? name : $"{street} : {name}";
-    }
-
-    public void Dispose()
-    {
-        lock (_lock)
-        {
-            foreach (var f in _files ?? []) f.Dispose();
-            _files = null;
-            _kinds.Clear();
-        }
     }
 }

@@ -36,8 +36,7 @@ public sealed partial class WzService
             var maps = lives.Where(life => life.Value.Npcs.Count > 0).ToList();
             Dictionary<int, string> names = [];
             if (anchor != null)
-                using (var index = new NameIndex(anchor, InRoot))
-                    names = index.Resolve("map", maps.Select(map => map.Key));
+                names = new NameIndex(anchor, InRoot).Resolve("map", maps.Select(map => map.Key));
             return _maps = maps
                 .OrderBy(map => map.Key)
                 .Select(map => new MapDto(map.Key, names.GetValueOrDefault(map.Key), map.Value.Npcs))

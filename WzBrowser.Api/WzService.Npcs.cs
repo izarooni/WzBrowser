@@ -52,8 +52,7 @@ public sealed partial class WzService
 
             Dictionary<int, string> names = [];
             if (archives.Count > 0)
-                using (var index = new NameIndex(archives[0].Entry.Path, InRoot))
-                    names = index.Resolve("npc", byNpc.Keys);
+                names = new NameIndex(archives[0].Entry.Path, InRoot).Resolve("npc", byNpc.Keys);
             var npcs = byNpc.OrderBy(kv => kv.Key)
                 .Select(kv => new NpcDto(kv.Key, names.GetValueOrDefault(kv.Key), kv.Value.Values.OrderBy(q => q.Id).ToList()))
                 .ToList();

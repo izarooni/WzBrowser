@@ -54,7 +54,7 @@ public sealed partial class WzService
                 foreach (var mob in life.Mobs.Keys) Add(mob, map);
 
             _mobImages ??= IndexMobImages();
-            using var names = new NameIndex(source, InRoot);
+            var names = new NameIndex(source, InRoot);
             var mobNames = names.Resolve("mob", spawns.Keys);
             var mapNames = names.Resolve("map", spawns.Values.SelectMany(m => m).Distinct());
             var mobs = spawns.OrderBy(kv => kv.Key)

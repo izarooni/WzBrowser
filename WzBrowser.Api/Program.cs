@@ -208,7 +208,9 @@ api.MapPost("/history/{step:long}", (long step, WzService wz) => wz.GoToHistory(
 // ---- WZ files ----
 api.MapGet("/files", (WzService wz, HttpContext ctx) => wz.List(browsableOnly: browseOnly));
 api.MapPost("/files", (OpenRequest req, WzService wz, HttpContext ctx) => wz.Open(req.Path, req.Encryption, browsableOnly: browseOnly));
-api.MapDelete("/files/{id}", (string id, WzService wz) => wz.Close(id) ? Results.NoContent() : Results.NotFound());
+api.MapDelete("/files/{id}", (string id, WzService wz) => wz.CloseAndRelease(id) ? Results.NoContent() : Results.NotFound());
+// Lets go of the files held without being listed (String.wz for names, _Canvas parts, ...); returns how many.
+api.MapPost("/files/release", (WzService wz) => new { Released = wz.ReleaseUnlisted() });
 api.MapGet("/files/{id}/children", (string id, string? path, WzService wz) => wz.Children(id, path));
 api.MapGet("/files/{id}/search", (string id, string q, int? depth, WzService wz) => wz.Search(id, q, depth ?? 3));
 api.MapGet("/files/{id}/node",(string id, string? path, WzService wz) => wz.Node(id, path));

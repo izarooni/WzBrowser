@@ -14,13 +14,16 @@ public sealed partial class WzService
     /// <summary>Every mob in the library's Mob data with its stats and String's name, read once. Null until first asked for.</summary>
     private List<MobDto>? _mobs;
 
+    /// <summary>Whether the library has Mob data; kept apart from the mob index, which can be let go of.</summary>
+    private bool? _hasMobs;
+
     /// <summary>True when the library has Mob data (cheap after the first call).</summary>
     public bool HasMobs
     {
         get
         {
             if (Root == null) return false;
-            lock (_mobsLock) return (_mobImages ??= IndexMobImages()).Count > 0;
+            lock (_mobsLock) return _hasMobs ??= (_mobImages ??= IndexMobImages()).Count > 0;
         }
     }
 

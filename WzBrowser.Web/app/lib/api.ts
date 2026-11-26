@@ -435,6 +435,8 @@ export function createApi(base: string) {
                 body: JSON.stringify({ path, encryption }),
             }),
         close: (id: string) => request<void>(`/api/files/${id}`, { method: "DELETE" }),
+        /** Lets go of the files the server holds without listing them (String.wz for names, ...); resolves how many. */
+        releaseUnlisted: () => request<{ released: number }>("/api/files/release", { method: "POST" }),
         children: (id: string, path = "") => request<WzNode[]>(`/api/files/${id}/children?path=${q(path)}`),
         /** Paths of nodes named like `q`: all directories/.imgs plus properties up to `depth` levels inside each .img. */
         search: (id: string, query: string, depth = 3) => request<string[]>(`/api/files/${id}/search?q=${q(query)}&depth=${depth}`),
